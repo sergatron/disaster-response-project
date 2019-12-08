@@ -77,14 +77,14 @@ def clean_data(datasets):
 
     # drop duplicates
     df.drop_duplicates(inplace=True)
-    
+
     # drop column of original messages, 'original'
     df.drop('original', axis=1, inplace=True)
 
     # amount of missing values is relatively small
     # drop rows with missing values
     df.dropna(inplace=True)
-     
+
     # perform a few checks
     # check for missing values
     if df.isnull().sum().any():
@@ -98,16 +98,16 @@ def clean_data(datasets):
 
 def save_data(df, database_filename):
     """
-    
+
     Load pd.DataFrame into a database with SQLite3.
-    
+
     Params:
         df: DataFrame to load into database
         database_filename: name of database to load
-        
+
     Returns:
         NoneType
-        
+
     """
     # Save the clean dataset into an sqlite database.
     conn = sqlite3.connect(f'{database_filename}.db')
@@ -126,12 +126,15 @@ def save_data(df, database_filename):
     engine = create_engine(f'sqlite:///{database_filename}.db')
     df.to_sql(database_filename, engine, index=False)
 
+    # additionally write a CSV file
+    df.to_csv(f"{database_filename}.csv", encoding='utf-8')
+
 
 def test_database(db_name):
     """
     Test database connection to confirm that it was created
     and has information in it.
-    
+
     Params:
         db_name: name of database to test
     Returns:
