@@ -1,0 +1,662 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# # ML Pipeline Preparation
+# Follow the instructions below to help you create your ML pipeline.
+# ### 1. Import libraries and load data from database.
+# - Import Python libraries
+# - Load dataset from database with [`read_sql_table`](https://pandas.pydata.org/pandas-docs/stable/generated/pandas.read_sql_table.html)
+# - Define feature and target variables X and Y
+
+# In[1]:
+
+
+import nltk
+#nltk.download(['stopwords', 'punkt', 'wordnet', 'averaged_perceptron_tagger',
+#               'maxent_ne_chunker', 'words', 'word2vec_sample'])
+
+# import libraries
+import re
+import numpy as np
+import pandas as pd
+
+import sqlite3
+from sqlalchemy import create_engine
+
+import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
+from nltk.stem.wordnet import WordNetLemmatizer
+from nltk.stem.porter import PorterStemmer
+
+from nltk import ne_chunk, pos_tag
+
+from sklearn import svm
+from sklearn.linear_model import (LogisticRegression,
+                                  SGDClassifier,
+                                  RidgeClassifierCV)
+
+from sklearn.ensemble import (RandomForestClassifier,
+                              GradientBoostingClassifier,
+                              BaggingClassifier,
+                              ExtraTreesClassifier)
+
+from sklearn.multioutput import MultiOutputClassifier
+
+from sklearn.naive_bayes import GaussianNB, BernoulliNB
+
+from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
+from sklearn.preprocessing import PolynomialFeatures
+
+from sklearn.pipeline import Pipeline, FeatureUnion
+from sklearn.preprocessing import (StandardScaler, RobustScaler, Normalizer,
+                                   FunctionTransformer, QuantileTransformer,
+                                   PowerTransformer)
+
+from sklearn.base import BaseEstimator, TransformerMixin
+
+from sklearn.feature_extraction.text import (CountVectorizer,
+                                             TfidfTransformer,
+                                             HashingVectorizer,
+                                             FeatureHasher)
+from sklearn.feature_selection import chi2, SelectKBest
+from sklearn.decomposition import PCA, TruncatedSVD
+
+from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
+                             recall_score, classification_report, make_scorer)
+
+from sklearn.utils import resample
+
+from models.custom_transformers import (SplitNote,
+                                        StartingVerbExtractor,
+                                        KeywordSearch,
+                                        EntityCount,
+                                        GetVerbNounCount
+                                        )
+
+
+# In[3]:
+
+
+pd.options.display.max_columns = 60
+
+def drop_class(Y):
+    """
+    Checks amount of classes in each category.
+    Drops class(es) (inplace) where there is less than 2 classes present.
+
+    This functions does not return anything.
+    """
+    # extract category which has less than two classes
+    print('Dropping class(es):', Y.nunique()[Y.nunique() < 2].index.tolist())
+    # drop category, `child_alone`
+    Y.drop(Y.nunique()[Y.nunique() < 2].index.tolist(), axis=1, inplace=True)
+
+# In[4]:
+def load_data(database_filepath):
+    """
+    Import data from database into a DataFrame. Split DataFrame into
+    features and predictors, `X` and `Y`.
+
+    Preprocess data.
+
+    Params:
+        database_filepath: file path of database
+
+    Returns:
+        pd.DataFrame of features and predictors, `X` and `Y`, respectively.
+    """
+    # load data from CSV
+    df = pd.read_csv(database_filepath)
+
+    # explore `related` feature where its labeled as a `2`
+    related_twos = df[df['related'] == 2]
+    df.drop(index=related_twos.index, inplace=True)
+
+    df = df.reset_index(drop=True)
+
+    # define features and predictors
+    X = df.loc[:, ['message']]
+    Y = df.loc[:, 'related':]
+    drop_class(Y)
+    category_names = Y.columns.to_list()
+
+    return X, Y, category_names
+
+#%%
+# load data from database
+engine = create_engine('sqlite:///data/disaster_message_cat.db')
+df = pd.read_sql_table('disaster_message_cat', engine)
+
+
+#idx = 78
+#df.loc[idx, 'message':]
+#msg = df.loc[idx, 'message']
+#df.loc[idx, 'related':]
+#print(msg)
+#
+#df[df['genre'] == 'news'].loc[13229, :]
+
+#%%
+X = df.loc[:, ['message']]
+Y = df.loc[:, 'related':]
+
+
+# explore `related` feature where its labeled as a `2`
+related_twos = df[df['related'] == 2]
+
+# try dropping the above rows
+df.drop(index=related_twos.index, inplace=True)
+df = df.reset_index(drop=True)
+# check count of classes
+df.nunique()
+
+# now `related` has been reduced down to two classes
+
+
+# In[8]:
+# EXPLORE MESSAGES IN MORE DETAIL
+
+idx = 9
+df.loc[idx, 'message']
+df.loc[idx, 'related':]
+
+
+#%%
+
+# all rows except `related` are equal to zero at given index
+(df.loc[idx, 'related':] == 0).all()
+
+# iterate over each message, find each row which contains ALL zeros
+row_sum = df.loc[:, 'related':].apply(sum, axis=1)
+drop_idx = row_sum[row_sum < 1].index
+print(len(drop_idx))
+
+
+# inspect indecies before dropping
+# NOTE: This message is asking for FOOD AND WATER. However, ALL labels
+#       indicate NO need for help
+idx = drop_idx[78]
+df.loc[idx, 'message']
+df.loc[idx, 'message':]
+
+
+idx = drop_idx[77]
+df.loc[idx, 'message']
+df.loc[idx, 'message':]
+
+#%%
+
+# DROP ROWS WHERE ALL LABELS ARE ZERO
+# iterate over each message, find each row which contains ALL zeros
+row_sum = df.loc[:, 'related':].apply(sum, axis=1)
+drop_idx = row_sum[row_sum < 1].index
+print(len(drop_idx))
+
+#%%
+# CHECK BALANCE
+before = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
+
+# DROP INDEX
+df.drop(index=drop_idx, inplace=True)
+
+# CHECK BALANCE, AGAIN
+after = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
+
+np.c_[before, after]
+
+# REPLACE `related` with zeros
+df['related'].replace(to_replace=1, value=0, inplace=True)
+df['related'].sum()
+
+
+#%%
+def tokenize(text):
+    """
+    Replace `url` with empty space "".
+    Tokenize and lemmatize input `text`.
+    Converts to lower case and strips whitespaces.
+
+
+    Returns:
+    --------
+        dtype: list, containing processed words
+    """
+    url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+
+    detected_urls = re.findall(url_regex, text)
+    for url in detected_urls:
+        text = text.replace(url, "")
+
+    # load stopwords
+    stop_words = stopwords.words("english")
+
+    # remove additional words
+    remove_words = ['one', 'reason', 'see']
+    for addtl_word in remove_words:
+        stop_words.append(addtl_word)
+
+    # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
+    # tokenize resulting text
+    tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
+
+    # lemmatize and remove stop words
+    lemmatized = [WordNetLemmatizer().lemmatize(word) for word in tokens if word not in stop_words]
+
+    return lemmatized
+
+
+
+#%%
+
+idx = 142
+msg = df.loc[idx, 'message']
+df.loc[idx, 'related':]
+print(msg)
+
+
+# tokenize, pos tag, then recognize named entities in text
+tree = ne_chunk(pos_tag(word_tokenize(msg)))
+print(tree)
+
+ne_list = ['GPE', 'PERSON', 'ORGANIZATION']
+ne_labels = []
+for item in tree.subtrees():
+    ne_labels.append(item.label())
+
+# FOUND ENTITIES
+pd.Series(ne_list).isin(ne_labels).astype(np.int32).values
+
+#%%
+def get_entity(text):
+    """
+    Search and tag for Named Entities in message.
+
+    Returns array representing found entities.
+    ['S', 'GPE', 'PERSON', 'ORGANIZATION']
+
+    Returns:
+    --------
+        np.array
+
+    """
+    tree = ne_chunk(pos_tag(word_tokenize(text)))
+
+    ne_list = ['GPE', 'PERSON', 'ORGANIZATION']
+    ne_labels = []
+    for item in tree.subtrees():
+        ne_labels.append(item.label())
+
+    return pd.Series(ne_list).isin(ne_labels).astype(np.int32)
+
+#get_entity(msg)
+#
+#ent = X['message'].apply(get_entity)
+
+#%%
+def get_count_vb_nn(text):
+    # EXTRACT `VERB` and `NOUN`
+    tok = tokenize(text)
+
+    # extract and count tags
+    tags = []
+    for tup in pos_tag(tok):
+        tags.append(tup[1])
+
+    verb_tag = ['VB', 'VBN', 'VBD', 'VBP', 'VBZ', 'VBG']
+    noun_tag = ['NNP', 'NN', 'NNS']
+    # series of occurances
+    verb_count = pd.Series(tags).isin(verb_tag).astype(np.int32).sum()
+    noun_count = pd.Series(tags).isin(noun_tag).astype(np.int32).sum()
+
+    # concat
+    return pd.Series([verb_count, noun_count])
+
+#get_count_vb_nn(msg).values
+#
+#vb_cnt = X['message'].apply(get_count_vb_nn)
+#vb_cnt.shape
+
+
+#%%
+#print(nltk.FreqDist(lem).most_common())
+#nltk.ConditionalFreqDist(pos_tag(lem))['is'].most_common()
+
+# POSITION OF VERBS AND NOUNS
+
+
+
+
+
+
+#%%
+
+def keyword_matrix(text):
+    """
+    Search keyword in `text`. Labels are used as keywords.
+
+    Returns:
+    --------
+        np.array
+    """
+    toks = tokenize(text)
+    labels = Y.columns.to_list()
+
+    # initialize array
+    arr = pd.Series(labels).isin(toks).astype(np.int32).values
+
+    return arr
+
+#kw_mat = X['message'].apply(keyword_matrix)
+
+
+# In[12]:
+
+#labels = Y.columns.to_list()
+#
+#msg = df.loc[796, 'message']
+#print(msg)
+#
+#toks = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', msg.lower().strip()))
+#tok_tagged = pos_tag(word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', msg.lower().strip())))
+#
+#
+#[WordNetLemmatizer().lemmatize(word) for word in labels]
+#
+#tokenize(msg)
+#
+#msg = df.loc[705, 'message']
+#print(msg)
+#
+#labels = Y.columns.to_list()
+#msg
+#sentence = nltk.sent_tokenize(msg)
+#tokenize(msg)
+#
+#[WordNetLemmatizer().lemmatize(word) for word, _ in model.most_similar('dollars')]
+#
+#def check_keyword(text):
+#    keywords = Y.columns.to_list()
+#    sentence = nltk.sent_tokenize(text)
+#    for kw in keywords:
+#        if kw in tokenize(text):
+#            return True
+#        return False
+#
+#check_keyword(msg)
+
+# In[30]:
+
+
+# LogisticRegression params
+lg_params = dict(
+    C = 0.01,
+#    solver = 'newton-cg',
+    penalty = 'l1',
+    class_weight = {0: 1, 1: 100},
+    multi_class = 'auto',
+    n_jobs = 6,
+    random_state = 11
+
+)
+
+# RandomForest params
+rf_params = dict(
+    n_estimators = 60,
+    random_state = 11,
+    n_jobs = 6,
+    class_weight = 'balanced'
+)
+
+# ExtraTrees params
+ext_params = dict(
+    n_estimators = 20,
+#    max_depth = 5,
+    random_state = 11,
+    n_jobs = 6,
+    class_weight = 'balanced'
+)
+
+svc_params = dict(
+    C = 0.001,
+    kernel = 'sigmoid',
+    cache_size = 1000,
+    class_weight = 'balanced',
+    random_state = 11
+
+)
+
+# define classifier
+clf = LogisticRegression(**lg_params)
+# clf = svm.SVC(**svc_params)
+#clf = ExtraTreesClassifier(**ext_params)
+# clf = RandomForestClassifier(**rf_params)
+
+pipeline = Pipeline([
+    ('preprocess', SplitNote()),
+
+    ('features', FeatureUnion([
+
+        ('text_pipeline', Pipeline([
+
+            ('count_vect', CountVectorizer(tokenizer=tokenize,
+                                           ngram_range=(2, 3),
+#                                           max_features=500
+                                          )
+            ),
+            ('tfidf_tx', TfidfTransformer()),
+#            ('quantile_tx', QuantileTransformer(output_distribution='normal',
+#                                                random_state=11)),
+#            ('decomp', TruncatedSVD(n_components=8, random_state=11)),
+
+        ])),
+        ('verb_noun_count', GetVerbNounCount()),
+        ('entity_count', EntityCount()),
+#        ('keywords', KeywordSearch()),
+#        ('pipe_2', Pipeline([('keywords', KeywordSearch()),
+#
+#                            ])),
+
+
+
+
+    ], n_jobs=-1)),
+    ('quantile_tx', QuantileTransformer(output_distribution='normal',
+                                                random_state=11)),
+    ('decomp', TruncatedSVD(n_components=8, random_state=11)),
+    ('clf', MultiOutputClassifier(clf, n_jobs=6))
+])
+
+
+# In[56]:
+
+# RESET INDEX
+df.reset_index(drop=True, inplace=True)
+
+# DEFINE `X` AND `Y` AGAIN
+X = df.sample(3000).loc[:, ['message']]
+Y = df.sample(3000).loc[:, 'related':]
+
+# ### 4. Train pipeline
+# - Split data into train and test sets
+# - Train pipeline
+
+# In[31]:
+
+
+# extract category which has less than two classes
+print(Y.nunique()[Y.nunique() < 2].index.tolist())
+
+# drop category, `child_alone`
+Y.drop(Y.nunique()[Y.nunique() < 2].index.tolist(), axis=1, inplace=True)
+
+
+X_train, X_test, y_train, y_test = train_test_split(X.values,
+                                                    Y.values,
+                                                    stratify=Y['offer'].values,
+                                                    test_size=0.15)
+
+
+# In[33]:
+
+
+pipeline.fit(X_train.ravel(), y_train)
+y_pred = pipeline.predict(X_test.ravel())
+
+#%%
+# ### 5. Test your model
+# Report the f1 score, precision and recall for each output category of the dataset. You can do this by iterating through the columns and calling sklearn's `classification_report` on each.
+
+# print(classification_report(y_test[:, 1], y_pred[:, 1]))
+# f1_score(y_test[:, 1], y_pred[:, 1])
+
+# print label and f1-score for each
+labels = Y.columns.tolist()
+scores = []
+for i in range(y_test[:, :].shape[1]):
+    scores.append(f1_score(y_test[:, i], y_pred[:, i]))
+
+print('Average across all labels:', sum(scores) / len(scores))
+
+# summarize f1-scores and compare to the rate of positive class occurance
+f1_df = pd.DataFrame({'f1-score': scores,
+                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
+f1_df
+
+
+# ### 6. Improve your model
+# Use grid search to find better parameters.
+
+# In[70]:
+
+
+svc_grid_params = {
+#     'features__text_pipeline__count_vect__ngram_range': [(1,2), (1,3)],
+    'clf__estimator__C': [0.8, 1.0, 1.2],
+
+}
+
+grid_cv = GridSearchCV(
+    pipeline,
+    svc_grid_params,
+    cv=3,
+    n_jobs=-1,
+)
+grid_cv.fit(X_train.ravel(), y_train)
+
+
+# In[71]:
+
+
+grid_cv.best_params_
+
+
+# In[74]:
+
+
+y_pred = grid_cv.predict(X_test.ravel())
+
+# print label and f1-score for each
+labels = Y.columns.tolist()
+scores = []
+for i in range(y_test[:, :].shape[1]):
+    scores.append(f1_score(y_test[:, i], y_pred[:, i]))
+for lbl, scr in zip(labels, scores):
+    print(lbl, ':', np.round(scr, 4))
+
+print('Average across all labels:', sum(scores) / len(scores))
+
+
+# ### 7. Test your model
+# Show the accuracy, precision, and recall of the tuned model.
+#
+# Since this project focuses on code quality, process, and  pipelines, there is no minimum performance metric needed to pass. However, make sure to fine tune your models for accuracy, precision and recall to make your project stand out - especially for your portfolio!
+
+# In[ ]:
+
+
+
+
+
+# ### 8. Try improving your model further. Here are a few ideas:
+# * try other machine learning algorithms
+# * add other features besides the TF-IDF
+# * sampling: upsample or downsample in order to improve balance between classes
+#  * however, upsampling minority classes may also affect majority classes and result in no significant imporvement
+# * create more features
+# * search each message for keywords; use target array labels as keywords
+#  * for example, search for keywords, `food`, `water`, `shelter`...
+
+# In[ ]:
+
+
+
+
+
+# ### 9. Export your model as a pickle file
+
+# In[ ]:
+
+
+
+
+
+# ### 10. Use this notebook to complete `train.py`
+# Use the template file attached in the Resources folder to write a script that runs the steps above to create a database and export a model based on a new dataset specified by the user.
+
+# In[ ]:
+
+
+
+
+
+# # Resampling
+
+# In[ ]:
+
+
+# # review class balance
+# print(y_train.sum() / y_train.shape[0])
+
+# # combine train sets
+# X_c = pd.concat([X_train, y_train], axis=1)
+
+# fail = X_c[X_c['tools'] == 0]
+# success = X_c[X_c['tools'] == 1]
+
+# # upsample to match 'fail' class
+# success_upsampled = resample(success,
+#                              replace=True,
+#                              n_samples=int(len(fail)*(0.25)),
+#                              random_state=11
+#                              )
+
+# upsample = pd.concat([fail, success_upsampled])
+
+# upsample['tools'].value_counts()
+
+# upsample.columns.to_list()
+
+# # split back into X_train, y_train
+# X_train = upsample.drop('tools', axis=1)
+# y_train = upsample['tools']
+
+# print('X_train size:  ', X_train.shape[0])
+# print('X_test size:   ', X_test.shape[0])
+# print('X_holdout size:', X_holdout.shape[0])
+
+
+# In[ ]:
+
+
+# from sklearn.utils.class_weight import compute_class_weight
+# class_weights = compute_class_weight('balanced', np.unique(y), y)
+
+
+# # Add more features
+
+# In[ ]:
+
+
+
+
