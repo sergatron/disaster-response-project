@@ -20,7 +20,6 @@ import re
 import numpy as np
 import pandas as pd
 
-import sqlite3
 from sqlalchemy import create_engine
 
 import nltk
@@ -33,13 +32,11 @@ from nltk import ne_chunk, pos_tag
 
 from sklearn import svm
 from sklearn.linear_model import (LogisticRegression,
-                                  SGDClassifier,
                                   RidgeClassifierCV)
 
 from sklearn.ensemble import (RandomForestClassifier,
-                              GradientBoostingClassifier,
                               BaggingClassifier,
-                              ExtraTreesClassifier)
+                              )
 
 from sklearn.multioutput import MultiOutputClassifier
 
@@ -57,10 +54,11 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 from sklearn.feature_extraction.text import (CountVectorizer,
                                              TfidfTransformer,
-                                             HashingVectorizer,
-                                             FeatureHasher)
+                                             HashingVectorizer
+                                             )
+
 from sklearn.feature_selection import chi2, SelectKBest
-from sklearn.decomposition import PCA, TruncatedSVD
+from sklearn.decomposition import PCA, TruncatedSVD, NMF
 
 from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
                              recall_score, classification_report, make_scorer)
@@ -71,7 +69,8 @@ from models.custom_transformers import (SplitNote,
                                         StartingVerbExtractor,
                                         KeywordSearch,
                                         EntityCount,
-                                        GetVerbNounCount
+                                        GetVerbNounCount,
+                                        tokenize
                                         )
 
 
@@ -125,7 +124,7 @@ def load_data(database_filepath):
 
 #%%
 # load data from database
-engine = create_engine('sqlite:///data/disaster_message_cat.db')
+engine = create_engine('sqlite:///../data/disaster_message_cat.db')
 df = pd.read_sql_table('disaster_message_cat', engine)
 
 
@@ -161,9 +160,6 @@ idx = 9
 df.loc[idx, 'message']
 df.loc[idx, 'related':]
 
-
-#%%
-
 # all rows except `related` are equal to zero at given index
 (df.loc[idx, 'related':] == 0).all()
 
@@ -185,13 +181,6 @@ idx = drop_idx[77]
 df.loc[idx, 'message']
 df.loc[idx, 'message':]
 
-#%%
-
-# DROP ROWS WHERE ALL LABELS ARE ZERO
-# iterate over each message, find each row which contains ALL zeros
-row_sum = df.loc[:, 'related':].apply(sum, axis=1)
-drop_idx = row_sum[row_sum < 1].index
-print(len(drop_idx))
 
 #%%
 # CHECK BALANCE
@@ -211,111 +200,61 @@ df['related'].sum()
 
 
 #%%
-def tokenize(text):
-    """
-    Replace `url` with empty space "".
-    Tokenize and lemmatize input `text`.
-    Converts to lower case and strips whitespaces.
-
-
-    Returns:
-    --------
-        dtype: list, containing processed words
-    """
-    url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-
-    detected_urls = re.findall(url_regex, text)
-    for url in detected_urls:
-        text = text.replace(url, "")
-
-    # load stopwords
-    stop_words = stopwords.words("english")
-
-    # remove additional words
-    remove_words = ['one', 'reason', 'see']
-    for addtl_word in remove_words:
-        stop_words.append(addtl_word)
-
-    # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
-    # tokenize resulting text
-    tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
-
-    # lemmatize and remove stop words
-    lemmatized = [WordNetLemmatizer().lemmatize(word) for word in tokens if word not in stop_words]
-
-    return lemmatized
-
-
-
-#%%
-
-idx = 142
-msg = df.loc[idx, 'message']
-df.loc[idx, 'related':]
-print(msg)
-
-
-# tokenize, pos tag, then recognize named entities in text
-tree = ne_chunk(pos_tag(word_tokenize(msg)))
-print(tree)
-
-ne_list = ['GPE', 'PERSON', 'ORGANIZATION']
-ne_labels = []
-for item in tree.subtrees():
-    ne_labels.append(item.label())
-
-# FOUND ENTITIES
-pd.Series(ne_list).isin(ne_labels).astype(np.int32).values
-
-#%%
-def get_entity(text):
-    """
-    Search and tag for Named Entities in message.
-
-    Returns array representing found entities.
-    ['S', 'GPE', 'PERSON', 'ORGANIZATION']
-
-    Returns:
-    --------
-        np.array
-
-    """
-    tree = ne_chunk(pos_tag(word_tokenize(text)))
-
-    ne_list = ['GPE', 'PERSON', 'ORGANIZATION']
-    ne_labels = []
-    for item in tree.subtrees():
-        ne_labels.append(item.label())
-
-    return pd.Series(ne_list).isin(ne_labels).astype(np.int32)
-
-#get_entity(msg)
+#def tokenize(text):
+#    """
+#    Replace `url` with empty space "".
+#    Tokenize and lemmatize input `text`.
+#    Converts to lower case and strips whitespaces.
 #
-#ent = X['message'].apply(get_entity)
+#
+#    Returns:
+#    --------
+#        dtype: list, containing processed words
+#    """
+#    url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+#
+#    detected_urls = re.findall(url_regex, text)
+#    for url in detected_urls:
+#        text = text.replace(url, "")
+#
+#    # load stopwords
+#    stop_words = stopwords.words("english")
+#
+#    # remove additional words
+#    remove_words = ['one', 'reason', 'see']
+#    for addtl_word in remove_words:
+#        stop_words.append(addtl_word)
+#
+#    # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
+#    # tokenize resulting text
+#    tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
+#
+#    # lemmatize and remove stop words
+#    lemmatized = [WordNetLemmatizer().lemmatize(word) for word in tokens if word not in stop_words]
+#
+#    return lemmatized
+
+
 
 #%%
-def get_count_vb_nn(text):
-    # EXTRACT `VERB` and `NOUN`
-    tok = tokenize(text)
 
-    # extract and count tags
-    tags = []
-    for tup in pos_tag(tok):
-        tags.append(tup[1])
-
-    verb_tag = ['VB', 'VBN', 'VBD', 'VBP', 'VBZ', 'VBG']
-    noun_tag = ['NNP', 'NN', 'NNS']
-    # series of occurances
-    verb_count = pd.Series(tags).isin(verb_tag).astype(np.int32).sum()
-    noun_count = pd.Series(tags).isin(noun_tag).astype(np.int32).sum()
-
-    # concat
-    return pd.Series([verb_count, noun_count])
-
-#get_count_vb_nn(msg).values
+#idx = 142
+#msg = df.loc[idx, 'message']
+#df.loc[idx, 'related':]
+#print(msg)
 #
-#vb_cnt = X['message'].apply(get_count_vb_nn)
-#vb_cnt.shape
+#
+## tokenize, pos tag, then recognize named entities in text
+#tree = ne_chunk(pos_tag(word_tokenize(msg)))
+#print(tree)
+#
+#ne_list = ['GPE', 'PERSON', 'ORGANIZATION']
+#ne_labels = []
+#for item in tree.subtrees():
+#    ne_labels.append(item.label())
+#
+## FOUND ENTITIES
+#pd.Series(ne_list).isin(ne_labels).astype(np.int32).values
 
 
 #%%
@@ -326,65 +265,6 @@ def get_count_vb_nn(text):
 
 
 
-
-
-
-#%%
-
-def keyword_matrix(text):
-    """
-    Search keyword in `text`. Labels are used as keywords.
-
-    Returns:
-    --------
-        np.array
-    """
-    toks = tokenize(text)
-    labels = Y.columns.to_list()
-
-    # initialize array
-    arr = pd.Series(labels).isin(toks).astype(np.int32).values
-
-    return arr
-
-#kw_mat = X['message'].apply(keyword_matrix)
-
-
-# In[12]:
-
-#labels = Y.columns.to_list()
-#
-#msg = df.loc[796, 'message']
-#print(msg)
-#
-#toks = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', msg.lower().strip()))
-#tok_tagged = pos_tag(word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', msg.lower().strip())))
-#
-#
-#[WordNetLemmatizer().lemmatize(word) for word in labels]
-#
-#tokenize(msg)
-#
-#msg = df.loc[705, 'message']
-#print(msg)
-#
-#labels = Y.columns.to_list()
-#msg
-#sentence = nltk.sent_tokenize(msg)
-#tokenize(msg)
-#
-#[WordNetLemmatizer().lemmatize(word) for word, _ in model.most_similar('dollars')]
-#
-#def check_keyword(text):
-#    keywords = Y.columns.to_list()
-#    sentence = nltk.sent_tokenize(text)
-#    for kw in keywords:
-#        if kw in tokenize(text):
-#            return True
-#        return False
-#
-#check_keyword(msg)
-
 # In[30]:
 
 
@@ -392,78 +272,56 @@ def keyword_matrix(text):
 lg_params = dict(
     C = 0.01,
 #    solver = 'newton-cg',
-    penalty = 'l1',
-    class_weight = {0: 1, 1: 100},
+    penalty = 'l2',
+    class_weight = {0: 1, 1: 600},
     multi_class = 'auto',
     n_jobs = 6,
     random_state = 11
 
 )
 
-# RandomForest params
-rf_params = dict(
-    n_estimators = 60,
-    random_state = 11,
-    n_jobs = 6,
-    class_weight = 'balanced'
-)
-
-# ExtraTrees params
-ext_params = dict(
-    n_estimators = 20,
-#    max_depth = 5,
-    random_state = 11,
-    n_jobs = 6,
-    class_weight = 'balanced'
-)
 
 svc_params = dict(
     C = 0.001,
-    kernel = 'sigmoid',
+    kernel = 'linear',
     cache_size = 1000,
-    class_weight = 'balanced',
+    class_weight = {0: 1, 1: 600},
     random_state = 11
 
 )
 
 # define classifier
 clf = LogisticRegression(**lg_params)
-# clf = svm.SVC(**svc_params)
-#clf = ExtraTreesClassifier(**ext_params)
-# clf = RandomForestClassifier(**rf_params)
+#clf = svm.SVC(**svc_params)
 
 pipeline = Pipeline([
     ('preprocess', SplitNote()),
 
     ('features', FeatureUnion([
 
-        ('text_pipeline', Pipeline([
-
-            ('count_vect', CountVectorizer(tokenizer=tokenize,
-                                           ngram_range=(2, 3),
-#                                           max_features=500
-                                          )
-            ),
-            ('tfidf_tx', TfidfTransformer()),
-#            ('quantile_tx', QuantileTransformer(output_distribution='normal',
-#                                                random_state=11)),
-#            ('decomp', TruncatedSVD(n_components=8, random_state=11)),
-
-        ])),
-        ('verb_noun_count', GetVerbNounCount()),
-        ('entity_count', EntityCount()),
-#        ('keywords', KeywordSearch()),
-#        ('pipe_2', Pipeline([('keywords', KeywordSearch()),
+#        ('text_pipeline', Pipeline([
 #
-#                            ])),
+#            ('count_vect', CountVectorizer(tokenizer=tokenize,
+#                                           ngram_range=(1, 3),
+#                                          )
+#            ),
+#            ('tfidf_tx', TfidfTransformer()),
+#
+#        ])),
 
-
-
+    ('keywords', KeywordSearch()),
+    ('verb_noun_count', GetVerbNounCount()),
+    ('entity_count', EntityCount()),
+    ('verb_extract', StartingVerbExtractor()),
 
     ], n_jobs=-1)),
+
+    ('tfidf_tx', TfidfTransformer()),
     ('quantile_tx', QuantileTransformer(output_distribution='normal',
-                                                random_state=11)),
-    ('decomp', TruncatedSVD(n_components=8, random_state=11)),
+                                        random_state=11)),
+    ('decomp', TruncatedSVD(n_components=10,
+                            random_state=11)),
+
     ('clf', MultiOutputClassifier(clf, n_jobs=6))
 ])
 
@@ -472,6 +330,9 @@ pipeline = Pipeline([
 
 # RESET INDEX
 df.reset_index(drop=True, inplace=True)
+
+#X = df.loc[:, ['message']]
+#Y = df.loc[:, 'related':]
 
 # DEFINE `X` AND `Y` AGAIN
 X = df.sample(3000).loc[:, ['message']]
@@ -516,31 +377,38 @@ scores = []
 for i in range(y_test[:, :].shape[1]):
     scores.append(f1_score(y_test[:, i], y_pred[:, i]))
 
-print('Average across all labels:', sum(scores) / len(scores))
 
 # summarize f1-scores and compare to the rate of positive class occurance
-f1_df = pd.DataFrame({'f1-score': scores,
+f1_df = pd.DataFrame({'f1-score': np.round(scores, 4),
                       'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
-f1_df
 
 
+print('\n')
+print('='*50)
+print('Average across all labels:', sum(scores) / len(scores))
+print(f1_df)
+print(clf.get_params())
+print('='*50)
+print('\n')
 # ### 6. Improve your model
 # Use grid search to find better parameters.
 
 # In[70]:
 
-
-svc_grid_params = {
-#     'features__text_pipeline__count_vect__ngram_range': [(1,2), (1,3)],
-    'clf__estimator__C': [0.8, 1.0, 1.2],
+print('Performing GridSearch. Please be patient ...')
+grid_params = {
+     'decomp__n_components': [5, 10],
+    'clf__estimator__C': [0.001, 0.0015],
+    'clf__estimator__class_weight': [{0: 1, 1: 500},
+                                     {0: 1, 1: 600},]
 
 }
 
 grid_cv = GridSearchCV(
     pipeline,
-    svc_grid_params,
+    grid_params,
     cv=3,
-    n_jobs=-1,
+    n_jobs=1,
 )
 grid_cv.fit(X_train.ravel(), y_train)
 
@@ -548,11 +416,8 @@ grid_cv.fit(X_train.ravel(), y_train)
 # In[71]:
 
 
-grid_cv.best_params_
-
-
-# In[74]:
-
+print('Using best params...')
+print(grid_cv.best_params_)
 
 y_pred = grid_cv.predict(X_test.ravel())
 
@@ -561,11 +426,19 @@ labels = Y.columns.tolist()
 scores = []
 for i in range(y_test[:, :].shape[1]):
     scores.append(f1_score(y_test[:, i], y_pred[:, i]))
-for lbl, scr in zip(labels, scores):
-    print(lbl, ':', np.round(scr, 4))
 
+
+# summarize f1-scores and compare to the rate of positive class occurance
+f1_df = pd.DataFrame({'f1-score': np.round(scores, 4),
+                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
+
+
+print('\n')
+print('='*50)
 print('Average across all labels:', sum(scores) / len(scores))
-
+print(f1_df)
+print('='*50)
+print('\n')
 
 # ### 7. Test your model
 # Show the accuracy, precision, and recall of the tuned model.
