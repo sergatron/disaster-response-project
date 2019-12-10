@@ -18,6 +18,7 @@ import nltk
 import re
 import numpy as np
 import pandas as pd
+import time
 
 from sqlalchemy import create_engine
 
@@ -289,6 +290,7 @@ lg_params = dict(
 svc_params = dict(
     C = 0.0001,
     kernel = 'rbf',
+    gamma = 0.002,
     cache_size = 1000,
     class_weight = {0: 1, 1: 500},
     random_state = 11
@@ -311,16 +313,17 @@ pipeline = Pipeline([
 
     ('features', FeatureUnion([
 
-#        ('text_pipeline', Pipeline([
-#
-#            ('count_vect', CountVectorizer(
-#                    tokenizer=tokenize,
-#                    ngram_range=(1, 3),
-#                    )
-#            ),
+        ('text_pipeline', Pipeline([
+
+            ('count_vect', CountVectorizer(
+                    tokenizer=tokenize,
+                    ngram_range=(1, 3),
+                    max_features=100,
+                    )
+            ),
 #            ('tfidf_tx', TfidfTransformer()),
-#
-#        ])),
+
+        ])),
 
     ('keywords', KeywordSearch()),
     ('verb_noun_count', GetVerbNounCount()),
@@ -350,9 +353,9 @@ X = df.loc[:, ['message']]
 Y = df.loc[:, 'related':]
 
 # DEFINE `X` AND `Y` AGAIN
-sample_it = True
+sample_it = False
 if sample_it:
-    sampler = df.sample(5000)
+    sampler = df.sample(20000)
     X = sampler.loc[:, ['message']]
     Y = sampler.loc[:, 'related':]
 
@@ -376,15 +379,20 @@ Y.drop(Y.nunique()[Y.nunique() < 2].index.tolist(), axis=1, inplace=True)
 X_train, X_test, y_train, y_test = train_test_split(X.values,
                                                     Y.values,
                                                     stratify=Y['offer'].values,
-                                                    test_size=0.15)
+                                                    test_size=0.12)
 
 
 # In[33]:
+print('Training model...')
 
+start_time = time.perf_counter()
 
 pipeline.fit(X_train.ravel(), y_train)
 y_pred = pipeline.predict(X_test.ravel())
 
+end_time = time.perf_counter()
+
+print('Training time:', np.round((end_time - start_time)/60, 4), 'min')
 #y_train_pred = pipeline.predict(X_train.ravel())
 
 #%%
@@ -394,17 +402,24 @@ y_pred = pipeline.predict(X_test.ravel())
 # print label and f1-score for each
 labels = Y.columns.tolist()
 test_scores = []
+prec = []
+rec = []
 acc = []
 #train_scores = []
 for i in range(y_test[:, :].shape[1]):
     test_scores.append(f1_score(y_test[:, i], y_pred[:, i]))
     acc.append(accuracy_score(y_test[:, i], y_pred[:, i]))
+    rec.append(recall_score(y_test[:, i], y_pred[:, i]))
+    prec.append(precision_score(y_test[:, i], y_pred[:, i]))
 #    train_scores.append(f1_score(y_train[:, i], y_train_pred[:, i]))
     print('*'*50)
     print(classification_report(y_test[:, i], y_pred[:, i]))
 
 # summarize f1-scores and compare to the rate of positive class occurance
 f1_df = pd.DataFrame({'f1-score': np.round(test_scores, 4),
+                      'precision': np.round(prec, 4),
+                      'recall': np.round(rec, 4),
+                      'accuracy': np.round(acc, 4),
                       'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
 
 
@@ -446,50 +461,50 @@ print('\n')
 
 # In[70]:
 #
-#print('Performing GridSearch. Please be patient ...')
-#grid_params = {
-##        'decomp__n_components': [1, 2, 3],
-#        'clf__estimator__C': [0.001, 0.0001, 0.0005, 0.0008],
-##        'clf__estimator__class_weight': [{0: 1, 1: 500},
-##                                         {0: 1, 1: 300},]
-#
-#}
-#
-#grid_cv = GridSearchCV(
-#    pipeline,
-#    grid_params,
-#    cv=3,
-#    n_jobs=1,
-#)
-#grid_cv.fit(X_train.ravel(), y_train)
-#
-#
-## In[71]:
-#
-#
-#print('Using best params...')
-#print(grid_cv.best_params_)
-#
-#y_pred = grid_cv.predict(X_test.ravel())
-#
-## print label and f1-score for each
-#labels = Y.columns.tolist()
-#scores = []
-#for i in range(y_test[:, :].shape[1]):
-#    scores.append(f1_score(y_test[:, i], y_pred[:, i]))
-#
-#
-## summarize f1-scores and compare to the rate of positive class occurance
-#f1_df = pd.DataFrame({'f1-score': np.round(scores, 4),
-#                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
-#
-#
-#print('\n')
-#print('='*50)
-#print('Average across all labels:', sum(scores) / len(scores))
-#print(f1_df)
-#print('='*50)
-#print('\n')
+print('Performing GridSearch. Please be patient ...')
+grid_params = {
+        'clf__estimator__gamma': [0.001, 0.0001, 0.00001],
+        'clf__estimator__C': [0.001, 0.0001, 0.0005, 0.0008],
+#        'clf__estimator__class_weight': [{0: 1, 1: 500},
+#                                         {0: 1, 1: 300},]
+
+}
+
+grid_cv = GridSearchCV(
+    pipeline,
+    grid_params,
+    cv=3,
+    n_jobs=1,
+)
+grid_cv.fit(X_train.ravel(), y_train)
+
+
+# In[71]:
+
+
+print('Using best params...')
+print(grid_cv.best_params_)
+
+y_pred = grid_cv.predict(X_test.ravel())
+
+# print label and f1-score for each
+labels = Y.columns.tolist()
+scores = []
+for i in range(y_test[:, :].shape[1]):
+    scores.append(f1_score(y_test[:, i], y_pred[:, i]))
+
+
+# summarize f1-scores and compare to the rate of positive class occurance
+f1_df = pd.DataFrame({'f1-score': np.round(scores, 4),
+                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
+
+
+print('\n')
+print('='*50)
+print('Average across all labels:', sum(scores) / len(scores))
+print(f1_df)
+print('='*50)
+print('\n')
 
 
 
