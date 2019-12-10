@@ -8,9 +8,8 @@
 # - Load dataset from database with [`read_sql_table`](https://pandas.pydata.org/pandas-docs/stable/generated/pandas.read_sql_table.html)
 # - Define feature and target variables X and Y
 
-# In[1]:
 
-
+#%%
 import nltk
 #nltk.download(['stopwords', 'punkt', 'wordnet', 'averaged_perceptron_tagger',
 #               'maxent_ne_chunker', 'words', 'word2vec_sample'])
@@ -32,10 +31,11 @@ from nltk import ne_chunk, pos_tag
 
 from sklearn import svm
 from sklearn.linear_model import (LogisticRegression,
-                                  RidgeClassifierCV)
+                                  RidgeClassifier)
 
 from sklearn.ensemble import (RandomForestClassifier,
                               BaggingClassifier,
+                              RandomTreesEmbedding
                               )
 
 from sklearn.multioutput import MultiOutputClassifier
@@ -58,10 +58,14 @@ from sklearn.feature_extraction.text import (CountVectorizer,
                                              )
 
 from sklearn.feature_selection import chi2, SelectKBest
-from sklearn.decomposition import PCA, TruncatedSVD, NMF
+from sklearn.decomposition import TruncatedSVD
+
+from sklearn.neighbors import (KNeighborsClassifier,
+                               NeighborhoodComponentsAnalysis)
 
 from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
-                             recall_score, classification_report, make_scorer)
+                             recall_score, classification_report,
+                             roc_curve, auc, accuracy_score, make_scorer)
 
 from sklearn.utils import resample
 
@@ -70,7 +74,8 @@ from models.custom_transformers import (SplitNote,
                                         KeywordSearch,
                                         EntityCount,
                                         GetVerbNounCount,
-                                        tokenize
+                                        tokenize,
+                                        Dense
                                         )
 
 
@@ -270,11 +275,11 @@ df['related'].sum()
 
 # LogisticRegression params
 lg_params = dict(
-    C = 0.01,
+    C = 0.001,
 #    solver = 'newton-cg',
     penalty = 'l2',
-    class_weight = {0: 1, 1: 600},
-    multi_class = 'auto',
+    class_weight = {0: 1, 1: 500},
+    multi_class = 'multinomial',
     n_jobs = 6,
     random_state = 11
 
@@ -282,17 +287,24 @@ lg_params = dict(
 
 
 svc_params = dict(
-    C = 0.001,
-    kernel = 'linear',
+    C = 0.0001,
+    kernel = 'rbf',
     cache_size = 1000,
-    class_weight = {0: 1, 1: 600},
+    class_weight = {0: 1, 1: 500},
     random_state = 11
 
 )
 
+rt_params = dict(
+        n_estimators = 20,
+        n_jobs = 6,
+        random_state = 11
+        )
+
 # define classifier
-clf = LogisticRegression(**lg_params)
-#clf = svm.SVC(**svc_params)
+#clf = LogisticRegression(**lg_params)
+clf = svm.SVC(**svc_params)
+
 
 pipeline = Pipeline([
     ('preprocess', SplitNote()),
@@ -301,9 +313,10 @@ pipeline = Pipeline([
 
 #        ('text_pipeline', Pipeline([
 #
-#            ('count_vect', CountVectorizer(tokenizer=tokenize,
-#                                           ngram_range=(1, 3),
-#                                          )
+#            ('count_vect', CountVectorizer(
+#                    tokenizer=tokenize,
+#                    ngram_range=(1, 3),
+#                    )
 #            ),
 #            ('tfidf_tx', TfidfTransformer()),
 #
@@ -317,11 +330,13 @@ pipeline = Pipeline([
     ], n_jobs=-1)),
 
     ('tfidf_tx', TfidfTransformer()),
-    ('quantile_tx', QuantileTransformer(output_distribution='normal',
+    ('quantile_tx', QuantileTransformer(output_distribution='uniform',
                                         random_state=11)),
     ('decomp', TruncatedSVD(n_components=10,
                             random_state=11)),
-
+#    ('rt', RandomTreesEmbedding(**rt_params)),
+#    ('dense', Dense()),
+#    ('scale', RobustScaler()),
     ('clf', MultiOutputClassifier(clf, n_jobs=6))
 ])
 
@@ -331,12 +346,18 @@ pipeline = Pipeline([
 # RESET INDEX
 df.reset_index(drop=True, inplace=True)
 
-#X = df.loc[:, ['message']]
-#Y = df.loc[:, 'related':]
+X = df.loc[:, ['message']]
+Y = df.loc[:, 'related':]
 
 # DEFINE `X` AND `Y` AGAIN
-X = df.sample(3000).loc[:, ['message']]
-Y = df.sample(3000).loc[:, 'related':]
+sample_it = True
+if sample_it:
+    sampler = df.sample(5000)
+    X = sampler.loc[:, ['message']]
+    Y = sampler.loc[:, 'related':]
+
+print('X-shape:', X.shape)
+print('Y-shape:', Y.shape)
 
 # ### 4. Train pipeline
 # - Split data into train and test sets
@@ -364,28 +385,32 @@ X_train, X_test, y_train, y_test = train_test_split(X.values,
 pipeline.fit(X_train.ravel(), y_train)
 y_pred = pipeline.predict(X_test.ravel())
 
+#y_train_pred = pipeline.predict(X_train.ravel())
+
 #%%
 # ### 5. Test your model
 # Report the f1 score, precision and recall for each output category of the dataset. You can do this by iterating through the columns and calling sklearn's `classification_report` on each.
 
-# print(classification_report(y_test[:, 1], y_pred[:, 1]))
-# f1_score(y_test[:, 1], y_pred[:, 1])
-
 # print label and f1-score for each
 labels = Y.columns.tolist()
-scores = []
+test_scores = []
+acc = []
+#train_scores = []
 for i in range(y_test[:, :].shape[1]):
-    scores.append(f1_score(y_test[:, i], y_pred[:, i]))
-
+    test_scores.append(f1_score(y_test[:, i], y_pred[:, i]))
+    acc.append(accuracy_score(y_test[:, i], y_pred[:, i]))
+#    train_scores.append(f1_score(y_train[:, i], y_train_pred[:, i]))
+    print('*'*50)
+    print(classification_report(y_test[:, i], y_pred[:, i]))
 
 # summarize f1-scores and compare to the rate of positive class occurance
-f1_df = pd.DataFrame({'f1-score': np.round(scores, 4),
+f1_df = pd.DataFrame({'f1-score': np.round(test_scores, 4),
                       'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
 
 
 print('\n')
 print('='*50)
-print('Average across all labels:', sum(scores) / len(scores))
+print('Average across all labels:', sum(test_scores) / len(test_scores))
 print(f1_df)
 print(clf.get_params())
 print('='*50)
@@ -393,52 +418,82 @@ print('\n')
 # ### 6. Improve your model
 # Use grid search to find better parameters.
 
+#%%
+#import matplotlib.pyplot as plt
+#fpr = dict()
+#tpr = dict()
+#roc_auc = dict()
+#for i in range(y_test[:, :].shape[1]):
+#    fpr[i], tpr[i], _ = roc_curve(y_test[:, i], y_pred[:, i])
+#    roc_auc[i] = auc(fpr[i], tpr[i])
+#
+##%%
+#plt.figure()
+#lw = 2
+#plt.plot(fpr[1], tpr[1], color='darkorange',
+#         lw=lw, label='ROC curve (area = %0.2f)' % roc_auc[1])
+#
+#plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+#plt.xlim([0.0, 1.0])
+#plt.ylim([0.0, 1.05])
+#plt.xlabel('False Positive Rate')
+#plt.ylabel('True Positive Rate')
+#plt.title('Receiver operating characteristic example')
+#plt.legend(loc="lower right")
+#plt.show()
+
+
+
 # In[70]:
+#
+#print('Performing GridSearch. Please be patient ...')
+#grid_params = {
+##        'decomp__n_components': [1, 2, 3],
+#        'clf__estimator__C': [0.001, 0.0001, 0.0005, 0.0008],
+##        'clf__estimator__class_weight': [{0: 1, 1: 500},
+##                                         {0: 1, 1: 300},]
+#
+#}
+#
+#grid_cv = GridSearchCV(
+#    pipeline,
+#    grid_params,
+#    cv=3,
+#    n_jobs=1,
+#)
+#grid_cv.fit(X_train.ravel(), y_train)
+#
+#
+## In[71]:
+#
+#
+#print('Using best params...')
+#print(grid_cv.best_params_)
+#
+#y_pred = grid_cv.predict(X_test.ravel())
+#
+## print label and f1-score for each
+#labels = Y.columns.tolist()
+#scores = []
+#for i in range(y_test[:, :].shape[1]):
+#    scores.append(f1_score(y_test[:, i], y_pred[:, i]))
+#
+#
+## summarize f1-scores and compare to the rate of positive class occurance
+#f1_df = pd.DataFrame({'f1-score': np.round(scores, 4),
+#                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
+#
+#
+#print('\n')
+#print('='*50)
+#print('Average across all labels:', sum(scores) / len(scores))
+#print(f1_df)
+#print('='*50)
+#print('\n')
 
-print('Performing GridSearch. Please be patient ...')
-grid_params = {
-     'decomp__n_components': [5, 10],
-    'clf__estimator__C': [0.001, 0.0015],
-    'clf__estimator__class_weight': [{0: 1, 1: 500},
-                                     {0: 1, 1: 600},]
-
-}
-
-grid_cv = GridSearchCV(
-    pipeline,
-    grid_params,
-    cv=3,
-    n_jobs=1,
-)
-grid_cv.fit(X_train.ravel(), y_train)
 
 
-# In[71]:
 
-
-print('Using best params...')
-print(grid_cv.best_params_)
-
-y_pred = grid_cv.predict(X_test.ravel())
-
-# print label and f1-score for each
-labels = Y.columns.tolist()
-scores = []
-for i in range(y_test[:, :].shape[1]):
-    scores.append(f1_score(y_test[:, i], y_pred[:, i]))
-
-
-# summarize f1-scores and compare to the rate of positive class occurance
-f1_df = pd.DataFrame({'f1-score': np.round(scores, 4),
-                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
-
-
-print('\n')
-print('='*50)
-print('Average across all labels:', sum(scores) / len(scores))
-print(f1_df)
-print('='*50)
-print('\n')
 
 # ### 7. Test your model
 # Show the accuracy, precision, and recall of the tuned model.
