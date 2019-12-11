@@ -355,7 +355,7 @@ Y = df.loc[:, 'related':]
 # DEFINE `X` AND `Y` AGAIN
 sample_it = False
 if sample_it:
-    sampler = df.sample(20000)
+    sampler = df.sample(10000)
     X = sampler.loc[:, ['message']]
     Y = sampler.loc[:, 'related':]
 
@@ -461,10 +461,12 @@ print('\n')
 
 # In[70]:
 #
+# GRID-SEARCH HYPERPARAMS
+
 print('Performing GridSearch. Please be patient ...')
 grid_params = {
-        'clf__estimator__gamma': [0.001, 0.0001, 0.00001],
-        'clf__estimator__C': [0.001, 0.0001, 0.0005, 0.0008],
+        'clf__estimator__gamma': [0.001, 0.00075, 0.00001],
+#        'clf__estimator__C': [0.001, 0.0001, 0.0005, 0.0008],
 #        'clf__estimator__class_weight': [{0: 1, 1: 500},
 #                                         {0: 1, 1: 300},]
 
@@ -489,36 +491,34 @@ y_pred = grid_cv.predict(X_test.ravel())
 
 # print label and f1-score for each
 labels = Y.columns.tolist()
-scores = []
+test_scores = []
+prec = []
+rec = []
+acc = []
+#train_scores = []
 for i in range(y_test[:, :].shape[1]):
-    scores.append(f1_score(y_test[:, i], y_pred[:, i]))
-
+    test_scores.append(f1_score(y_test[:, i], y_pred[:, i]))
+    acc.append(accuracy_score(y_test[:, i], y_pred[:, i]))
+    rec.append(recall_score(y_test[:, i], y_pred[:, i]))
+    prec.append(precision_score(y_test[:, i], y_pred[:, i]))
+#    train_scores.append(f1_score(y_train[:, i], y_train_pred[:, i]))
+    print('*'*50)
+    print(classification_report(y_test[:, i], y_pred[:, i]))
 
 # summarize f1-scores and compare to the rate of positive class occurance
-f1_df = pd.DataFrame({'f1-score': np.round(scores, 4),
+f1_df = pd.DataFrame({'f1-score': np.round(test_scores, 4),
+                      'precision': np.round(prec, 4),
+                      'recall': np.round(rec, 4),
+                      'accuracy': np.round(acc, 4),
                       'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
 
 
 print('\n')
 print('='*50)
-print('Average across all labels:', sum(scores) / len(scores))
+print('Average across all labels:', sum(test_scores) / len(test_scores))
 print(f1_df)
 print('='*50)
 print('\n')
-
-
-
-
-
-# ### 7. Test your model
-# Show the accuracy, precision, and recall of the tuned model.
-#
-# Since this project focuses on code quality, process, and  pipelines, there is no minimum performance metric needed to pass. However, make sure to fine tune your models for accuracy, precision and recall to make your project stand out - especially for your portfolio!
-
-# In[ ]:
-
-
-
 
 
 # ### 8. Try improving your model further. Here are a few ideas:
