@@ -157,7 +157,8 @@ def test_database(db_name):
         df = pd.read_sql(f"SELECT * FROM {db_name}", con=conn)
         if any(df):
             print(df.sample(5))
-            print('\nSuccess! Database established!\n')
+            print('Success! Cleaned data saved to database!')
+            print('\n\n')
     except:
         print('Database not found')
 
@@ -180,8 +181,6 @@ def main():
         print(f'\nTesting database {database_filepath}...\n')
         test_database(database_filepath)
 
-        print('Success! Cleaned data saved to database!')
-        print('\n\n')
 
     else:
         print('Please provide the filepaths of the messages and categories '\
