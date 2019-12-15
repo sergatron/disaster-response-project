@@ -168,27 +168,26 @@ df.info()
 
 # In[16]:
 
-
 # check number of duplicates
-df[df.duplicated(keep=False)].shape
+df[df.duplicated(subset='id', keep=False)].shape[0]
 
-messages_df[messages_df.duplicated(keep=False)]
+messages_df[messages_df.duplicated(subset='id', keep=False)]
+
 
 # In[17]:
 
-
 # drop duplicates
-df.drop_duplicates(keep='first', inplace=True)
+df.drop_duplicates(subset = 'id', inplace = True)
 
 
 # In[18]:
 
 
 # check number of duplicates
-df[df.duplicated(keep=False)]
+df[df.duplicated(subset='id', keep=False)].shape[0]
 
 # print warning if any duplicates are found
-if df[df.duplicated(keep=False)].any().any():
+if df[df.duplicated(subset='id', keep=False)].any().any():
     print('WARNING: Contains duplicate rows!')
 
 # ## Missing Values
