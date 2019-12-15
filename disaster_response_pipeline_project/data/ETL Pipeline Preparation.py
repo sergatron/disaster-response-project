@@ -216,7 +216,7 @@ df[df.related.isnull()]
 
 # amount of missing values is relatively small
 # drop rows with missing values
-df.dropna(inplace=True)
+df.dropna(subset=['related'], inplace=True)
 
 
 # In[20]:
