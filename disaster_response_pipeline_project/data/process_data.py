@@ -12,10 +12,12 @@ def load_data(messages_filepath, categories_filepath):
     Loads each data set into a pd.DataFrame.
 
     Params:
+    -------
         messages_filepath: file path of messages CSV
         categories_filepath: file path of categories CSV
 
     Returns:
+    --------
         pd.DataFrame of merged data sets, `messages_filepath`
         and `categories_filepath`
 
@@ -40,6 +42,7 @@ def clean_data(datasets):
         - Drop missing values, axis=0
 
     Returns:
+    --------
         Clean pd.DataFrame
 
     """
@@ -76,21 +79,21 @@ def clean_data(datasets):
     df = pd.concat([df, categories_df], axis=1)
 
     # drop duplicates
-    df.drop_duplicates(inplace=True)
+    df.drop_duplicates(subset = 'id', inplace = True)
 
     # drop column of original messages, 'original'
     df.drop('original', axis=1, inplace=True)
 
     # amount of missing values is relatively small
     # drop rows with missing values
-    df.dropna(inplace=True)
+    df.dropna(subset=['related'], inplace=True)
 
     # perform a few checks
     # check for missing values
     if df.isnull().sum().any():
         print('WARNING: Contains missing values!')
     # check for duplicate rows
-    if df[df.duplicated(keep=False)].any().any():
+    if df[df.duplicated(subset='id', keep=False)].any().any():
         print('WARNING: Contains duplicate rows!')
     return df
 
@@ -102,10 +105,12 @@ def save_data(df, database_filename):
     Load pd.DataFrame into a database with SQLite3.
 
     Params:
+    -------
         df: DataFrame to load into database
         database_filename: name of database to load
 
     Returns:
+    --------
         NoneType
 
     """
@@ -136,19 +141,25 @@ def test_database(db_name):
     and has information in it.
 
     Params:
+    -------
         db_name: name of database to test
+
     Returns:
+    --------
         Prints a sample of the data contained in specified database.
         dtype: NoneType
     """
     # test connection to database
     conn = sqlite3.connect(f'{db_name}.db')
     cur = conn.cursor()
-    # create the test table including project_id as a primary key
-    df = pd.read_sql(f"SELECT * FROM {db_name}", con=conn)
-    if any(df):
-        print(df.sample(5))
-        print('\nSuccess! Database established!\n')
+    try:
+        # create the test table including project_id as a primary key
+        df = pd.read_sql(f"SELECT * FROM {db_name}", con=conn)
+        if any(df):
+            print(df.sample(5))
+            print('\nSuccess! Database established!\n')
+    except:
+        print('Database not found')
 
 
 def main():
