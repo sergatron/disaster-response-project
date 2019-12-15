@@ -40,6 +40,8 @@ from sklearn.ensemble import (RandomForestClassifier,
                               )
 
 from sklearn.multioutput import MultiOutputClassifier
+from sklearn.multiclass import OneVsRestClassifier
+
 
 from sklearn.naive_bayes import GaussianNB, BernoulliNB
 
@@ -49,7 +51,9 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn.preprocessing import (StandardScaler, RobustScaler, Normalizer,
                                    FunctionTransformer, QuantileTransformer,
-                                   PowerTransformer)
+                                   PowerTransformer, OneHotEncoder)
+
+from sklearn.compose import ColumnTransformer
 
 from sklearn.base import BaseEstimator, TransformerMixin
 
@@ -70,14 +74,13 @@ from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
 
 from sklearn.utils import resample
 
-from models.custom_transformers import (SplitNote,
-                                        StartingVerbExtractor,
-                                        KeywordSearch,
-                                        EntityCount,
-                                        GetVerbNounCount,
-                                        tokenize,
-                                        Dense
-                                        )
+from models.custom_tx import (StartingVerbExtractor,
+                              KeywordSearch,
+                              EntityCount,
+                              GetVerbNounCount,
+                              tokenize,
+                              Dense
+                              )
 
 
 # In[3]:
@@ -189,20 +192,21 @@ df.loc[idx, 'message':]
 
 
 #%%
-# CHECK BALANCE
-before = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
 
-# DROP INDEX
-df.drop(index=drop_idx, inplace=True)
-
-# CHECK BALANCE, AGAIN
-after = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
-
-np.c_[before, after]
-
-# REPLACE `related` with zeros
-df['related'].replace(to_replace=1, value=0, inplace=True)
-df['related'].sum()
+## CHECK BALANCE
+#before = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
+#
+## DROP INDEX
+#df.drop(index=drop_idx, inplace=True)
+#
+## CHECK BALANCE, AGAIN
+#after = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
+#
+#np.c_[before, after]
+#
+## REPLACE `related` with zeros
+#df['related'].replace(to_replace=1, value=0, inplace=True)
+#df['related'].sum()
 
 
 #%%
@@ -276,8 +280,8 @@ df['related'].sum()
 
 # LogisticRegression params
 lg_params = dict(
-    C = 0.001,
-#    solver = 'newton-cg',
+    C = 0.1,
+    solver = 'newton-cg',
     penalty = 'l2',
     class_weight = {0: 1, 1: 500},
     multi_class = 'multinomial',
@@ -288,9 +292,9 @@ lg_params = dict(
 
 
 svc_params = dict(
-    C = 0.0001,
-    kernel = 'rbf',
-    gamma = 0.002,
+    C = 1,
+    kernel = 'linear',
+#    gamma = 0.002,
     cache_size = 1000,
     class_weight = {0: 1, 1: 500},
     random_state = 11
@@ -302,61 +306,93 @@ rt_params = dict(
         n_jobs = 6,
         random_state = 11
         )
+rf_params = dict(
+        n_estimators=120,
+        max_depth=6,
+        min_samples_split=10,
+        class_weight={0: 1, 1: 600},
+        n_jobs=-1,
+        random_state=11
+        )
 
 # define classifier
-#clf = LogisticRegression(**lg_params)
-clf = svm.SVC(**svc_params)
-
+clf = LogisticRegression(**lg_params)
+#clf = svm.SVC(**svc_params)
+#clf = RandomForestClassifier()
 
 pipeline = Pipeline([
-    ('preprocess', SplitNote()),
+        ('count_vect', CountVectorizer(
+                tokenizer=tokenize,
+                ngram_range=(1, 2),
+#                max_features=200
+                )),
+        ('tfidf_tx', TfidfTransformer()),
+        ('clf', MultiOutputClassifier(clf, n_jobs=6))
+    ])
 
-    ('features', FeatureUnion([
+#pipeline = Pipeline([
+##    ('preprocess', SplitNote()),
+#
+#    ('features', FeatureUnion([
+#            ('text_pipeline', Pipeline([
+#                    ('count_vect', CountVectorizer(
+#                            tokenizer=tokenize,
+#                            ngram_range=(1, 2),
+#                            max_features=200
+#                            ))
+#                    ])),
+#
+##            ('keywords', KeywordSearch()),
+##            ('verb_noun_count', GetVerbNounCount()),
+#            ('entity_count', EntityCount()),
+#            ('verb_extract', StartingVerbExtractor()),
+#
+#
+#    ], n_jobs=-1)),
+#
+#    ('tfidf_tx', TfidfTransformer()),
+##    ('quantile_tx', QuantileTransformer(output_distribution='normal',
+##                                        random_state=11)),
+##    ('decomp', TruncatedSVD(n_components=10,
+##                            random_state=11)),
+##    ('rt', RandomTreesEmbedding(**rt_params)),
+##    ('dense', Dense()),
+##    ('poly', PolynomialFeatures(degree=3, interaction_only=True)),
+##    ('scale', RobustScaler()),
+##    ('cat', genre_pipe),
+#    ('clf', MultiOutputClassifier(OneVsRestClassifier(clf, n_jobs=-1),
+#                                  n_jobs=-1))
+#    ],
+#    memory='models/cache'
+#    )
 
-        ('text_pipeline', Pipeline([
-
-            ('count_vect', CountVectorizer(
-                    tokenizer=tokenize,
-                    ngram_range=(1, 3),
-                    max_features=100,
-                    )
-            ),
-#            ('tfidf_tx', TfidfTransformer()),
-
-        ])),
-
-    ('keywords', KeywordSearch()),
-    ('verb_noun_count', GetVerbNounCount()),
-    ('entity_count', EntityCount()),
-    ('verb_extract', StartingVerbExtractor()),
-
-    ], n_jobs=-1)),
-
-    ('tfidf_tx', TfidfTransformer()),
-    ('quantile_tx', QuantileTransformer(output_distribution='uniform',
-                                        random_state=11)),
-    ('decomp', TruncatedSVD(n_components=10,
-                            random_state=11)),
-#    ('rt', RandomTreesEmbedding(**rt_params)),
-#    ('dense', Dense()),
-#    ('scale', RobustScaler()),
-    ('clf', MultiOutputClassifier(clf, n_jobs=6))
-])
-
+# use ColumnTransfomer to combine transformations
+# NOTE:
+#    OneHot expects 2-D, therefore, the column(s) must be specified
+#    as a list!
+#full_pipe = Pipeline([
+#        ('union', ColumnTransformer([
+#                ('category', OneHotEncoder(), [0]),
+#                ('messages', pipeline, 1),
+#                ])),
+#        ('clf', MultiOutputClassifier(OneVsRestClassifier(clf, n_jobs=-1),
+#                                      n_jobs=-1))
+#        ], memory='models/cache')
 
 # In[56]:
 
 # RESET INDEX
 df.reset_index(drop=True, inplace=True)
+df['genre'] = df['genre'].astype('category')
 
-X = df.loc[:, ['message']]
+X = df.loc[:, 'message']
 Y = df.loc[:, 'related':]
 
 # DEFINE `X` AND `Y` AGAIN
 sample_it = False
 if sample_it:
-    sampler = df.sample(10000)
-    X = sampler.loc[:, ['message']]
+    sampler = df.sample(8000)
+    X = sampler.loc[:, 'message']
     Y = sampler.loc[:, 'related':]
 
 print('X-shape:', X.shape)
@@ -379,7 +415,7 @@ Y.drop(Y.nunique()[Y.nunique() < 2].index.tolist(), axis=1, inplace=True)
 X_train, X_test, y_train, y_test = train_test_split(X.values,
                                                     Y.values,
                                                     stratify=Y['offer'].values,
-                                                    test_size=0.12)
+                                                    test_size=0.15)
 
 
 # In[33]:
@@ -387,18 +423,22 @@ print('Training model...')
 
 start_time = time.perf_counter()
 
-pipeline.fit(X_train.ravel(), y_train)
-y_pred = pipeline.predict(X_test.ravel())
+pipeline.fit(X_train, y_train)
+y_pred = pipeline.predict(X_test)
+
+#full_pipe.fit(X_train, y_train)
+#y_pred = full_pipe.predict(X_test)
 
 end_time = time.perf_counter()
 
+print('\n---')
 print('Training time:', np.round((end_time - start_time)/60, 4), 'min')
-#y_train_pred = pipeline.predict(X_train.ravel())
+print('\n---')
 
-#%%
 # ### 5. Test your model
 # Report the f1 score, precision and recall for each output category of the dataset. You can do this by iterating through the columns and calling sklearn's `classification_report` on each.
 
+print('Scoring model...')
 # print label and f1-score for each
 labels = Y.columns.tolist()
 test_scores = []
@@ -426,10 +466,39 @@ f1_df = pd.DataFrame({'f1-score': np.round(test_scores, 4),
 print('\n')
 print('='*50)
 print('Average across all labels:', sum(test_scores) / len(test_scores))
-print(f1_df)
-print(clf.get_params())
+#print(f1_df)
+#print(clf.get_params())
 print('='*50)
 print('\n')
+
+#result = classification_report(y_test,
+#                            y_pred,
+#                            target_names=Y.columns.tolist(),
+#                            output_dict=True
+#                            )
+#
+#print(pd.DataFrame(result).T)
+print(classification_report(y_test, y_pred, target_names=Y.columns.tolist()))
+
+#print(Y.columns)
+#print(classification_report(y_test[:, 2], y_pred[:, 2]))
+
+#%%
+with open('results.txt', 'a') as file:
+    file.write('\n\n')
+    file.write(str(time.localtime()))
+    file.write(('-'*100))
+    file.write(str(pipeline.get_params()))
+    file.write(str(f1_df))
+    file.write('\n')
+    file.write(str(sum(test_scores) / len(test_scores)))
+    file.write('\n')
+    file.write(('-'*100))
+    file.write('\n\n')
+
+
+
+
 # ### 6. Improve your model
 # Use grid search to find better parameters.
 
@@ -460,13 +529,13 @@ print('\n')
 
 
 # In[70]:
-#
+
 # GRID-SEARCH HYPERPARAMS
 
 print('Performing GridSearch. Please be patient ...')
 grid_params = {
-        'clf__estimator__gamma': [0.001, 0.00075, 0.00001],
-#        'clf__estimator__C': [0.001, 0.0001, 0.0005, 0.0008],
+        'clf__estimator__C': [1.2, 6, 12, 24, 50],
+#        'clf__estimator__n_estimators': [80, 120, 150],
 #        'clf__estimator__class_weight': [{0: 1, 1: 500},
 #                                         {0: 1, 1: 300},]
 
@@ -476,9 +545,10 @@ grid_cv = GridSearchCV(
     pipeline,
     grid_params,
     cv=3,
+    scoring='precision_weighted',
     n_jobs=1,
 )
-grid_cv.fit(X_train.ravel(), y_train)
+grid_cv.fit(X_train, y_train)
 
 
 # In[71]:
@@ -487,7 +557,7 @@ grid_cv.fit(X_train.ravel(), y_train)
 print('Using best params...')
 print(grid_cv.best_params_)
 
-y_pred = grid_cv.predict(X_test.ravel())
+y_pred = grid_cv.predict(X_test)
 
 # print label and f1-score for each
 labels = Y.columns.tolist()
@@ -503,21 +573,22 @@ for i in range(y_test[:, :].shape[1]):
     prec.append(precision_score(y_test[:, i], y_pred[:, i]))
 #    train_scores.append(f1_score(y_train[:, i], y_train_pred[:, i]))
     print('*'*50)
-    print(classification_report(y_test[:, i], y_pred[:, i]))
+#    print(classification_report(y_test[:, i], y_pred[:, i]))
 
 # summarize f1-scores and compare to the rate of positive class occurance
-f1_df = pd.DataFrame({'f1-score': np.round(test_scores, 4),
-                      'precision': np.round(prec, 4),
-                      'recall': np.round(rec, 4),
-                      'accuracy': np.round(acc, 4),
-                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
+#f1_df = pd.DataFrame({'f1-score': np.round(test_scores, 4),
+#                      'precision': np.round(prec, 4),
+#                      'recall': np.round(rec, 4),
+#                      'accuracy': np.round(acc, 4),
+#                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
 
 
 print('\n')
 print('='*50)
-print('Average across all labels:', sum(test_scores) / len(test_scores))
-print(f1_df)
+print('Average F1-score across all labels:', sum(test_scores) / len(test_scores))
+#print(f1_df)
 print('='*50)
+print(classification_report(y_test, y_pred, target_names=Y.columns.tolist()))
 print('\n')
 
 
