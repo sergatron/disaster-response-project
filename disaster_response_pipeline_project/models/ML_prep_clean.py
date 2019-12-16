@@ -70,7 +70,7 @@ from sklearn.neighbors import (KNeighborsClassifier,
 
 from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
                              recall_score, classification_report,
-                             roc_curve, auc, accuracy_score, make_scorer)
+                             roc_auc_score,accuracy_score, make_scorer)
 
 from sklearn.utils import resample
 
@@ -90,8 +90,11 @@ pd.options.display.max_columns = 60
 
 def drop_class(Y):
     """
-    Checks amount of classes in each category.
+    Checks distribution of classes in each category.
     Drops class(es) (inplace) where there is less than 2 classes present.
+
+    For example, if one of the target classes contain only ones of zeros,
+    that target class will be removed.
 
     This functions does not return anything.
     """
@@ -133,8 +136,8 @@ def load_data(database_filepath):
 
 #%%
 # load data from database
-engine = create_engine('sqlite:///../data/disaster_message_cat.db')
-df = pd.read_sql_table('disaster_message_cat', engine)
+engine = create_engine('sqlite:///../data/disaster_response.db')
+df = pd.read_sql_table('disaster_response', engine)
 
 
 #idx = 78
@@ -280,7 +283,7 @@ df.loc[idx, 'message':]
 
 # LogisticRegression params
 lg_params = dict(
-    C = 0.1,
+    C = 2,
     solver = 'newton-cg',
     penalty = 'l2',
     class_weight = {0: 1, 1: 500},
@@ -292,7 +295,7 @@ lg_params = dict(
 
 
 svc_params = dict(
-    C = 1,
+    C = 4,
     kernel = 'linear',
 #    gamma = 0.002,
     cache_size = 1000,
@@ -307,64 +310,62 @@ rt_params = dict(
         random_state = 11
         )
 rf_params = dict(
-        n_estimators=120,
-        max_depth=6,
-        min_samples_split=10,
+        n_estimators=50,
+        max_depth=4,
+        # min_samples_split=10,
         class_weight={0: 1, 1: 600},
-        n_jobs=-1,
+        n_jobs=6,
         random_state=11
         )
 
 # define classifier
 clf = LogisticRegression(**lg_params)
-#clf = svm.SVC(**svc_params)
-#clf = RandomForestClassifier()
+# clf = svm.SVC(**svc_params)
+# clf = RandomForestClassifier(**rf_params)
+
+# pipeline = Pipeline([
+#         ('count_vect', CountVectorizer(
+#                 tokenizer=tokenize,
+#                 ngram_range=(1, 2),
+# #                max_features=200
+#                 )),
+#         ('tfidf_tx', TfidfTransformer()),
+#         ('clf', MultiOutputClassifier(clf, n_jobs=6))
+#     ])
 
 pipeline = Pipeline([
-        ('count_vect', CountVectorizer(
-                tokenizer=tokenize,
-                ngram_range=(1, 2),
-#                max_features=200
-                )),
-        ('tfidf_tx', TfidfTransformer()),
-        ('clf', MultiOutputClassifier(clf, n_jobs=6))
-    ])
 
-#pipeline = Pipeline([
-##    ('preprocess', SplitNote()),
-#
-#    ('features', FeatureUnion([
-#            ('text_pipeline', Pipeline([
-#                    ('count_vect', CountVectorizer(
-#                            tokenizer=tokenize,
-#                            ngram_range=(1, 2),
-#                            max_features=200
-#                            ))
-#                    ])),
-#
-##            ('keywords', KeywordSearch()),
-##            ('verb_noun_count', GetVerbNounCount()),
-#            ('entity_count', EntityCount()),
-#            ('verb_extract', StartingVerbExtractor()),
-#
-#
-#    ], n_jobs=-1)),
-#
-#    ('tfidf_tx', TfidfTransformer()),
-##    ('quantile_tx', QuantileTransformer(output_distribution='normal',
-##                                        random_state=11)),
-##    ('decomp', TruncatedSVD(n_components=10,
-##                            random_state=11)),
-##    ('rt', RandomTreesEmbedding(**rt_params)),
-##    ('dense', Dense()),
-##    ('poly', PolynomialFeatures(degree=3, interaction_only=True)),
-##    ('scale', RobustScaler()),
-##    ('cat', genre_pipe),
-#    ('clf', MultiOutputClassifier(OneVsRestClassifier(clf, n_jobs=-1),
-#                                  n_jobs=-1))
-#    ],
-#    memory='models/cache'
-#    )
+    ('features', FeatureUnion([
+            ('text_pipeline', Pipeline([
+                    ('count_vect', CountVectorizer(
+                            tokenizer=tokenize,
+                            ngram_range=(1, 2),
+                            # max_features=300
+                            ))
+                    ])),
+
+            # ('keywords', KeywordSearch()),
+            # ('verb_noun_count', GetVerbNounCount()),
+            # ('entity_count', EntityCount()),
+            # ('verb_extract', StartingVerbExtractor()),
+
+
+    ], n_jobs=-1)),
+
+    ('tfidf_tx', TfidfTransformer()),
+    # ('quantile_tx', QuantileTransformer(output_distribution='normal',
+    #                                     random_state=11)),
+    # ('decomp', TruncatedSVD(n_components=3,
+    #                         random_state=11)),
+    # ('rt', RandomTreesEmbedding(**rt_params)),
+    ('dense', Dense()),
+    # ('poly', PolynomialFeatures(degree=3, interaction_only=True)),
+    ('scale', RobustScaler()),
+#    ('cat', genre_pipe),
+    ('clf', MultiOutputClassifier(clf, n_jobs=6))
+    ],
+    memory='models/cache'
+    )
 
 # use ColumnTransfomer to combine transformations
 # NOTE:
@@ -375,8 +376,7 @@ pipeline = Pipeline([
 #                ('category', OneHotEncoder(), [0]),
 #                ('messages', pipeline, 1),
 #                ])),
-#        ('clf', MultiOutputClassifier(OneVsRestClassifier(clf, n_jobs=-1),
-#                                      n_jobs=-1))
+#        ('clf', MultiOutputClassifier(clf,n_jobs=-1))
 #        ], memory='models/cache')
 
 # In[56]:
@@ -389,9 +389,9 @@ X = df.loc[:, 'message']
 Y = df.loc[:, 'related':]
 
 # DEFINE `X` AND `Y` AGAIN
-sample_it = False
+sample_it = True
 if sample_it:
-    sampler = df.sample(8000)
+    sampler = df.sample(3000)
     X = sampler.loc[:, 'message']
     Y = sampler.loc[:, 'related':]
 
@@ -423,8 +423,8 @@ print('Training model...')
 
 start_time = time.perf_counter()
 
-pipeline.fit(X_train, y_train)
-y_pred = pipeline.predict(X_test)
+pipeline.fit(X_train.ravel(), y_train)
+y_pred = pipeline.predict(X_test.ravel())
 
 #full_pipe.fit(X_train, y_train)
 #y_pred = full_pipe.predict(X_test)
@@ -440,48 +440,34 @@ print('\n---')
 
 print('Scoring model...')
 # print label and f1-score for each
+avg = 'weighted'
 labels = Y.columns.tolist()
-test_scores = []
+f1 = []
 prec = []
 rec = []
 acc = []
 #train_scores = []
 for i in range(y_test[:, :].shape[1]):
-    test_scores.append(f1_score(y_test[:, i], y_pred[:, i]))
+    f1.append(f1_score(y_test[:, i], y_pred[:, i], average=avg))
     acc.append(accuracy_score(y_test[:, i], y_pred[:, i]))
-    rec.append(recall_score(y_test[:, i], y_pred[:, i]))
-    prec.append(precision_score(y_test[:, i], y_pred[:, i]))
-#    train_scores.append(f1_score(y_train[:, i], y_train_pred[:, i]))
-    print('*'*50)
-    print(classification_report(y_test[:, i], y_pred[:, i]))
+    rec.append(recall_score(y_test[:, i], y_pred[:, i], average=avg))
+    prec.append(precision_score(y_test[:, i], y_pred[:, i], average=avg))
 
 # summarize f1-scores and compare to the rate of positive class occurance
-f1_df = pd.DataFrame({'f1-score': np.round(test_scores, 4),
+f1_df = pd.DataFrame({'f1-score': np.round(f1, 4),
                       'precision': np.round(prec, 4),
                       'recall': np.round(rec, 4),
-                      'accuracy': np.round(acc, 4),
-                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
+                      'accuracy': np.round(acc, 4)}, index=labels)
 
 
 print('\n')
-print('='*50)
-print('Average across all labels:', sum(test_scores) / len(test_scores))
-#print(f1_df)
-#print(clf.get_params())
-print('='*50)
+print('='*75)
+print(f1_df)
+print('\n')
+print(f1_df.agg(['mean', 'median', 'std']))
+print('='*75)
 print('\n')
 
-#result = classification_report(y_test,
-#                            y_pred,
-#                            target_names=Y.columns.tolist(),
-#                            output_dict=True
-#                            )
-#
-#print(pd.DataFrame(result).T)
-print(classification_report(y_test, y_pred, target_names=Y.columns.tolist()))
-
-#print(Y.columns)
-#print(classification_report(y_test[:, 2], y_pred[:, 2]))
 
 #%%
 with open('results.txt', 'a') as file:
@@ -489,10 +475,11 @@ with open('results.txt', 'a') as file:
     file.write(str(time.localtime()))
     file.write(('-'*100))
     file.write(str(pipeline.get_params()))
+    file.write('\n\n')
     file.write(str(f1_df))
-    file.write('\n')
-    file.write(str(sum(test_scores) / len(test_scores)))
-    file.write('\n')
+    file.write('\n\n')
+    file.write(str(f1_df.agg(['mean', 'median', 'std'])))
+    file.write('\n\n')
     file.write(('-'*100))
     file.write('\n\n')
 
@@ -534,7 +521,7 @@ with open('results.txt', 'a') as file:
 
 print('Performing GridSearch. Please be patient ...')
 grid_params = {
-        'clf__estimator__C': [1.2, 6, 12, 24, 50],
+        'clf__estimator__C': [2, 4],
 #        'clf__estimator__n_estimators': [80, 120, 150],
 #        'clf__estimator__class_weight': [{0: 1, 1: 500},
 #                                         {0: 1, 1: 300},]
@@ -545,53 +532,49 @@ grid_cv = GridSearchCV(
     pipeline,
     grid_params,
     cv=3,
-    scoring='precision_weighted',
-    n_jobs=1,
+    scoring='f1_weighted',
+    n_jobs=2,
 )
-grid_cv.fit(X_train, y_train)
-
-
-# In[71]:
+grid_cv.fit(X_train.ravel(), y_train)
 
 
 print('Using best params...')
 print(grid_cv.best_params_)
 
-y_pred = grid_cv.predict(X_test)
+y_pred = grid_cv.predict(X_test.ravel())
 
+print('Scoring model using tuned params...')
 # print label and f1-score for each
+avg = 'weighted'
 labels = Y.columns.tolist()
-test_scores = []
+f1 = []
 prec = []
 rec = []
 acc = []
 #train_scores = []
 for i in range(y_test[:, :].shape[1]):
-    test_scores.append(f1_score(y_test[:, i], y_pred[:, i]))
+    f1.append(f1_score(y_test[:, i], y_pred[:, i], average=avg))
     acc.append(accuracy_score(y_test[:, i], y_pred[:, i]))
-    rec.append(recall_score(y_test[:, i], y_pred[:, i]))
-    prec.append(precision_score(y_test[:, i], y_pred[:, i]))
-#    train_scores.append(f1_score(y_train[:, i], y_train_pred[:, i]))
-    print('*'*50)
-#    print(classification_report(y_test[:, i], y_pred[:, i]))
+    rec.append(recall_score(y_test[:, i], y_pred[:, i], average=avg))
+    prec.append(precision_score(y_test[:, i], y_pred[:, i], average=avg))
 
 # summarize f1-scores and compare to the rate of positive class occurance
-#f1_df = pd.DataFrame({'f1-score': np.round(test_scores, 4),
-#                      'precision': np.round(prec, 4),
-#                      'recall': np.round(rec, 4),
-#                      'accuracy': np.round(acc, 4),
-#                      'pos-class-occurance': Y.sum()/Y.shape[0]}, index=labels)
+f1_df = pd.DataFrame({'f1-score': np.round(f1, 4),
+                      'precision': np.round(prec, 4),
+                      'recall': np.round(rec, 4),
+                      'accuracy': np.round(acc, 4)}, index=labels)
 
 
 print('\n')
-print('='*50)
-print('Average F1-score across all labels:', sum(test_scores) / len(test_scores))
-#print(f1_df)
-print('='*50)
-print(classification_report(y_test, y_pred, target_names=Y.columns.tolist()))
+print('='*75)
+print(f1_df)
+print('\n')
+print(f1_df.agg(['mean', 'median', 'std']))
+print('='*75)
 print('\n')
 
 
+#%%
 # ### 8. Try improving your model further. Here are a few ideas:
 # * try other machine learning algorithms
 # * add other features besides the TF-IDF
