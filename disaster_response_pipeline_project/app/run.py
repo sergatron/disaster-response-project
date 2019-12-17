@@ -1,36 +1,64 @@
+import re
 import json
 import plotly
 import pandas as pd
 
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
-
+from nltk.corpus import stopwords
 from flask import Flask
 from flask import render_template, request, jsonify
 from plotly.graph_objs import Bar
-from sklearn.externals import joblib
+# from sklearn.externals import joblib
+from joblib import dump, load
 from sqlalchemy import create_engine
 
+
+import os
+# os.chdir('../models')
 
 app = Flask(__name__)
 
 def tokenize(text):
-    tokens = word_tokenize(text)
-    lemmatizer = WordNetLemmatizer()
+    """
+    Replace `url` with empty space "".
+    Tokenize and lemmatize input `text`.
+    Converts to lower case and strips whitespaces.
 
-    clean_tokens = []
-    for tok in tokens:
-        clean_tok = lemmatizer.lemmatize(tok).lower().strip()
-        clean_tokens.append(clean_tok)
 
-    return clean_tokens
+    Returns:
+    --------
+        dtype: list, containing processed words
+    """
+    url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+
+    detected_urls = re.findall(url_regex, text)
+    for url in detected_urls:
+        text = text.replace(url, "")
+
+    # load stopwords
+    stop_words = stopwords.words("english")
+
+    # remove additional words
+    remove_words = ['one', 'reason', 'see']
+    for addtl_word in remove_words:
+        stop_words.append(addtl_word)
+
+    # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
+    # tokenize resulting text
+    tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
+    lemm = WordNetLemmatizer()
+    # lemmatize and remove stop words
+    lemmatized = [lemm.lemmatize(word) for word in tokens if word not in stop_words]
+
+    return lemmatized
 
 # load data
-engine = create_engine('sqlite:///../data/disaster_response.db')
+engine = create_engine('sqlite:///data/disaster_response.db')
 df = pd.read_sql_table('disaster_response', engine)
 
 # load model
-model = joblib.load("../models/dis_res_model.pkl")
+model = load("models/disaster_clf.pkl")
 
 
 # index webpage displays cool visuals and receives user input text for model
