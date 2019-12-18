@@ -51,10 +51,13 @@ For reproducibility, this repo may be cloned. Once cloned, scripts must be execu
 
 Copy repo:
 ```$ git clone https://github.com/sergatron/disaster-response-project.git```
+
 Execute script to proccess data:
 ```python data/process_data.py data/disaster_messages.csv data/disaster_categories.csv data/DisasterResponse.db```
+
 Train classifier:
 ```python models/train_classifier.py data/DisasterResponse.db models/my_model.pkl```
+
 Run web app:
 ```python app/run.py```
 
