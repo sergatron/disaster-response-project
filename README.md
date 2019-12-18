@@ -4,6 +4,7 @@
 The goal of this project is to classify raw text disaster messages such that they can be forwarded automatically to appropriate relief agencies. This is something that is overwhelming for humans to classify when there may be thousands of messages coming in every minute. 
 
 # File Description
+```
  - **app/**: 
         |__ **run.py**: loads database file and model, renders plots, and classifies queries using loaded model
         |__ **templates/**
@@ -18,13 +19,13 @@ The goal of this project is to classify raw text disaster messages such that the
  - **models/**: 
         |__ **train_classifier.py**: loads from database, trains and tunes hyper-params, outputs a pickled model
         |__ **disaster_clf_.pkl**: pickled model
-
+```
 
 # Acknowledgments
 
 
 # Structure
-
+```
 **disaster_response_project**
   |
   |___ **app**
@@ -41,4 +42,4 @@ The goal of this project is to classify raw text disaster messages such that the
   |___ **models**
             |__ train_classifier.py
             |__ disaster_clf.pkl
-  
+  ```
