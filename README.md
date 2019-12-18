@@ -49,16 +49,27 @@ For reproducibility, this repo may be cloned. Once cloned, scripts must be execu
 
 **NOTE**: Before running the web app, you may need to change a few lines to specify correct directories so that the data and model are loaded properly.
 
+In general, the following steps need to performed:
+ 1. Clone repo
+ 2. Process data
+ 3. Train classifier
+ 4. Run web app
+
+
 Copy repo:
+
 ```$ git clone https://github.com/sergatron/disaster-response-project.git```
 
 Execute script to proccess data:
+
 ```python data/process_data.py data/disaster_messages.csv data/disaster_categories.csv data/DisasterResponse.db```
 
 Train classifier:
+
 ```python models/train_classifier.py data/DisasterResponse.db models/my_model.pkl```
 
 Run web app:
+
 ```python app/run.py```
 
 
