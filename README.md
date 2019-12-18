@@ -25,7 +25,7 @@ The goal of this project is to classify raw text disaster messages such that the
 ```
 
 # Acknowledgments
-
+This project is part of the Data Engineering lesson offered by Udacity's Data Science Nanodegree. The templates used here are provided by [Udacity](https://www.udacity.com/).
 
 # Structure
 ```
