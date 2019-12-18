@@ -12,7 +12,7 @@ The goal of this project is to classify raw text disaster messages such that the
             |__ index.html: homepage.
             
 -- data 
-    |__ **process_data.py**: merges and cleans (2) CSV files, disaster_messages.csv and disaster_categories.csv, 
+    |__ process_data.py: merges and cleans (2) CSV files, disaster_messages.csv and disaster_categories.csv, 
                              then writes clean data to a database file.
     |__ disaster_messages.csv: original data, contains messages.
     |__ disaster_categories.csv: original data, contains categories.
