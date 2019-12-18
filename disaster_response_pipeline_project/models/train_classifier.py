@@ -1,14 +1,20 @@
-import nltk
-#nltk.download(['stopwords', 'punkt', 'wordnet', 'averaged_perceptron_tagger',
-#               'maxent_ne_chunker', 'words', 'word2vec_sample'])
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+warnings.filterwarnings('ignore')
 
 from joblib import dump, load
+
 import pickle
 import sys
 import re
 import numpy as np
 import pandas as pd
 import time
+
+import nltk
+nltk.download(['stopwords', 'punkt', 'wordnet', 'averaged_perceptron_tagger',
+              'maxent_ne_chunker', 'words', 'word2vec_sample'])
+
 
 from sqlalchemy import create_engine
 
@@ -17,31 +23,26 @@ from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
 from nltk.stem.porter import PorterStemmer
-
 from nltk import ne_chunk, pos_tag
 
 from sklearn import svm
-from sklearn.linear_model import (LogisticRegression,
-                                  RidgeClassifier)
+from sklearn.linear_model import LogisticRegression
 
 from sklearn.ensemble import (RandomForestClassifier,
                               BaggingClassifier,
-                              RandomTreesEmbedding
+                              RandomTreesEmbedding,
+                              GradientBoostingClassifier
                               )
 
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.multiclass import OneVsRestClassifier
 
 
-from sklearn.naive_bayes import GaussianNB, BernoulliNB
 
-from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
-from sklearn.preprocessing import PolynomialFeatures
+from sklearn.model_selection import train_test_split, GridSearchCV
 
 from sklearn.pipeline import Pipeline, FeatureUnion
-from sklearn.preprocessing import (StandardScaler, RobustScaler, Normalizer,
-                                   FunctionTransformer, QuantileTransformer,
-                                   PowerTransformer, OneHotEncoder)
+from sklearn.preprocessing import Normalizer, QuantileTransformer
 
 from sklearn.compose import ColumnTransformer
 
@@ -64,20 +65,52 @@ from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
 
 from sklearn.utils import resample
 
-from models.custom_tx import (StartingVerbExtractor,
-                              KeywordSearch,
-                              EntityCount,
-                              GetVerbNounCount,
-                              tokenize,
-                              Dense
-                              )
+# from custom_tx import tokenize
 
 #%%
 
-def load_data(database_filepath, file_type='db'):
+def tokenize(text):
+    """
+    Replace `url` with empty space "".
+    Tokenize and lemmatize input `text`.
+    Converts to lower case and strips whitespaces.
+
+
+    Returns:
+    --------
+        dtype: list, containing processed words
+    """
+    url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+
+    detected_urls = re.findall(url_regex, text)
+    for url in detected_urls:
+        text = text.replace(url, "")
+
+    # load stopwords
+    stop_words = stopwords.words("english")
+
+    # remove additional words
+    remove_words = ['one', 'reason', 'see']
+    for addtl_word in remove_words:
+        stop_words.append(addtl_word)
+
+    # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
+    # tokenize resulting text
+    tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
+    lemm = WordNetLemmatizer()
+    # lemmatize and remove stop words
+    lemmatized = [lemm.lemmatize(word) for word in tokens if word not in stop_words]
+
+    return lemmatized
+
+
+# In[4]:
+def load_data(database_filepath):
     """
     Import data from database into a DataFrame. Split DataFrame into
     features and predictors, `X` and `Y`.
+
+    Preprocess data.
 
     Params:
         database_filepath: file path of database
@@ -85,81 +118,98 @@ def load_data(database_filepath, file_type='db'):
     Returns:
         pd.DataFrame of features and predictors, `X` and `Y`, respectively.
     """
-    if file_type == 'db':
-        # load data from database
-        engine = create_engine(f'sqlite:///{database_filepath}.db')
-        df = pd.read_sql_table(f'{database_filepath}', engine)
+    engine = create_engine('sqlite:///data/disaster_response.db')
+    df = pd.read_sql_table('disaster_response', engine)
 
-        # define features and predictors
-        X = df.loc[:, ['message']]
-        Y = df.loc[:, 'related':]
-        category_names = Y.columns.to_list()
+    #           *** TEMPORARY SAMPLE TO TEST SCRIPT ***
+    df = df.sample(3000)
 
-        return X, Y, category_names
+    # explore `related` feature where its labeled as a `2`
+    related_twos = df[df['related'] == 2]
+    df.drop(index=related_twos.index, inplace=True)
 
-    # load data from CSV
-    df = pd.read_csv(f'{database_filepath}.csv')
+    df = df.reset_index(drop=True)
 
     # define features and predictors
-    X = df.loc[:, ['message']]
+    X = df.loc[:, 'message']
     Y = df.loc[:, 'related':]
+
+
+    # extract label names
     category_names = Y.columns.to_list()
 
     return X, Y, category_names
 
-
 #%%
 
-#X, y = load_data('data/disaster_message_cat')
-#
-#SplitNote().fit_transform(X.values.ravel())
-#
-#StartingVerbExtractor().fit_transform(X.values.ravel())
+def grid_search(model):
+    rf = RandomForestClassifier()
+    gb = GradientBoostingClassifier()
+    bg = BaggingClassifier()
 
-#%%
+    grid_params = [
+        # {
+        #     'clf__estimator': [rf],
+        #     'clf__estimator__n_estimators': [120],
+        #     # 'clf__estimator__max_depth': [3],
+        #     'count_vec__max_features': [50, 100, 300],
+        #     },
 
-def grid_search(model, params, X_train=X_train, y_train=y_train):
+        {
+            'clf__estimator': [bg],
+            'clf__estimator__n_estimators': [60],
+            'clf__estimator__max_samples': [1.0],
+            'clf__estimator__n_jobs': [-1],
+            'count_vect__ngram_range': [(1, 1), (1, 2), (1, 3)],
+            }
+        ]
+
 
     grid_cv = GridSearchCV(
         model,
-        params,
+        grid_params,
         cv=3,
         scoring='f1_weighted',
-        n_jobs=-1,
+        n_jobs=1,
     )
-    grid_cv.fit(X_train.ravel(), y_train)
+
     return grid_cv
 
 def build_model():
 
-    svc_params = dict(
-        C = 2,
-        kernel = 'linear',
-        cache_size = 1000,
-        class_weight = 'balanced',
-        random_state = 11
 
-    )
+    rf_params = dict(
+        n_estimators=40,
+        max_depth=5,
+        class_weight='balanced',
+        n_jobs=-1,
+        random_state=11
+        )
+    # clf = svm.SVC(**svc_params)
+    clf = RandomForestClassifier(**rf_params)
 
-    # initialize classifier
-    clf = svm.SVC(**svc_params)
-
-    pipeline = Pipeline([
-        ('count_vect', CountVectorizer(
+    count_vec = CountVectorizer(
                 tokenizer=tokenize,
                 ngram_range=(1, 2),
-                max_features=300
-                )),
-        ('tfidf_tx', TfidfTransformer()),
+                )
+    tfidf = TfidfTransformer()
+
+    # build pipeline
+    pipeline = Pipeline([
+        ('count_vect', count_vec),
+        ('tfidf_tx', tfidf),
+        ('decomp', TruncatedSVD(n_components=2,
+                                random_state=11)),
         ('clf', MultiOutputClassifier(clf, n_jobs=-1))
     ])
 
-    return pipeline
+    # return grid search object
+    return grid_search(pipeline)
 
 
 
 
-def evaluate_model(model, x_test, y_test, y_pred, category_names):
+def evaluate_model(model, x_test, y_test, category_names):
     y_pred = model.predict(x_test)
     # print label and f1-score for each
     avg = 'weighted'
@@ -167,12 +217,15 @@ def evaluate_model(model, x_test, y_test, y_pred, category_names):
     prec = []
     rec = []
     acc = []
-    #train_scores = []
     for i in range(y_test[:, :].shape[1]):
-        f1.append(f1_score(y_test[:, i], y_pred[:, i], average=avg))
-        acc.append(accuracy_score(y_test[:, i], y_pred[:, i]))
-        rec.append(recall_score(y_test[:, i], y_pred[:, i], average=avg))
-        prec.append(precision_score(y_test[:, i], y_pred[:, i], average=avg))
+     #    with warnings.catch_warnings():
+    	# # ignore all caught warnings
+     #        warnings.filterwarnings("ignore")
+
+        acc.append(accuracy_score(y_test[:, i],y_pred[:, i]))
+        f1.append(f1_score(y_test[:, i],y_pred[:, i], average=avg,))
+        rec.append(recall_score(y_test[:, i],y_pred[:, i], average=avg))
+        prec.append(precision_score(y_test[:, i],y_pred[:, i], average=avg))
 
     # summarize f1-scores and compare to the rate of positive class occurance
     f1_df = pd.DataFrame({'f1-score': np.round(f1, 4),
@@ -191,11 +244,12 @@ def evaluate_model(model, x_test, y_test, y_pred, category_names):
 
 
 
+def show_info(X_train, y_train):
+    print("X-shape:", X_train.shape)
+    print("Y-shape:", y_train.shape)
 
 def save_model(model, filepath):
     """
-
-
     Parameters
     ----------
         model : estimator
@@ -214,27 +268,44 @@ def save_model(model, filepath):
         print('Failed to pickle model')
 
 
-
+#%%
 def main():
     if len(sys.argv) == 3:
-        database_filepath, model_filepath = sys.argv[1:]
-        print('Loading data...\n    DATABASE: {}'.format(database_filepath))
-        X, Y, category_names = load_data(database_filepath)
-        X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore")
 
-        print('Building model...')
-        model = build_model()
+            database_filepath, model_filepath = sys.argv[1:]
 
-        print('Training model...')
-        model.fit(X_train, Y_train)
+            print('\nLoading data...\n    DATABASE: {}'.format(database_filepath))
 
-        print('Evaluating model...')
-        evaluate_model(model, X_test, Y_test, category_names)
+            X, Y, category_names = load_data(database_filepath)
+            X_train, X_test, y_train, y_test = train_test_split(X.values,
+                                                                Y.values,
+                                                                stratify=Y['floods'].values,
+                                                                test_size=0.2)
 
-        print('Saving model...\n    MODEL: {}'.format(model_filepath))
-        save_model(model, model_filepath)
+            show_info(X_train, y_train)
 
-        print('Trained model saved!')
+            print('\nBuilding model...')
+            model = build_model()
+
+            start_time = time.perf_counter()
+            print('\nTraining model...')
+            model.fit(X_train.ravel(), y_train)
+            end_time = time.perf_counter()
+
+            print('\nEvaluating model...')
+            evaluate_model(model, X_test.ravel(), y_test, category_names)
+
+            print('\nBest model:', model.best_estimator_)
+            print('Best params:', model.best_params_)
+
+            print('\nTraining time:', np.round((end_time - start_time)/60, 4), 'min')
+
+            print('\nSaving model...\n    MODEL: {}'.format(model_filepath))
+            save_model(model, model_filepath)
+
+            print('\nTrained model saved!\n')
 
     else:
         print('Please provide the filepath of the disaster messages database '\
