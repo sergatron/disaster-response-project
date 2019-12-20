@@ -1,3 +1,4 @@
+
 import re
 import json
 import plotly
@@ -18,7 +19,7 @@ import os
 # os.chdir('../models')
 
 app = Flask(__name__)
-
+#%%
 def tokenize(text):
     """
     Replace `url` with empty space "".
@@ -53,45 +54,105 @@ def tokenize(text):
 
     return lemmatized
 
+
+def load_data(database_filepath):
+    """
+    Import data from database into a DataFrame. Split DataFrame into
+    features and predictors, `X` and `Y`.
+
+    Preprocess data.
+
+    Params:
+        database_filepath: file path of database
+
+    Returns:
+        pd.DataFrame of features and predictors, `X` and `Y`, respectively.
+    """
+
+    # extract directory name
+    dir_ = re.findall(".*/", database_filepath)
+    engine = create_engine(f'sqlite:///{database_filepath}')
+    # extratc table name by stripping away directory name
+    table_name = database_filepath.replace('.db', '').replace(dir_[0], "")
+
+    df = pd.read_sql_table(f'{table_name}', engine)
+
+    #           *** TEMPORARY SAMPLE TO TEST SCRIPT ***
+    df = df.sample(4000)
+
+    # explore `related` feature where its labeled as a `2`
+    related_twos = df[df['related'] == 2]
+    df.drop(index=related_twos.index, inplace=True)
+
+    df = df.reset_index(drop=True)
+
+    # define features and predictors
+    X = df.loc[:, 'message']
+    Y = df.loc[:, 'related':]
+
+
+    # extract label names
+    category_names = Y.columns.to_list()
+
+    return X, Y, df, category_names
+
+#%%
 # load data
-engine = create_engine('sqlite:///data/disaster_response.db')
-df = pd.read_sql_table('disaster_response', engine)
+# engine = create_engine('sqlite:///data/disaster_response.db')
+# df = pd.read_sql_table('disaster_response', engine)
 
 # load model
 model = load("models/disaster_clf.pkl")
 
+X, Y, df, category_names = load_data('data/disaster_response.db')
 
 # index webpage displays cool visuals and receives user input text for model
 @app.route('/')
 @app.route('/index')
 def index():
 
+
+
     # extract data needed for visuals
-    # TODO: Below is an example - modify to extract data for your own visuals
-    genre_counts = df.groupby('genre').count()['message']
-    genre_names = list(genre_counts.index)
+    genre_counts = df['genre'].value_counts().values
+    genre_names = df['genre'].value_counts().index.to_list()
+
+    # extract category names and count of each
+    category_names = list(Y.sum().sort_values(ascending=False).index)
+    category_values = list(Y.sum().sort_values(ascending=False))
 
     # create visuals
-    # TODO: Below is an example - modify to create your own visuals
     graphs = [
         {
             'data': [
-                Bar(
-                    x=genre_names,
-                    y=genre_counts
-                )
-            ],
+                Bar(x = genre_names,
+                    y = genre_counts)
+                ],
 
             'layout': {
                 'title': 'Distribution of Message Genres',
-                'yaxis': {
-                    'title': "Count"
-                },
-                'xaxis': {
-                    'title': "Genre"
+                'yaxis': {'title': "Count"},
+                'xaxis': {'title': "Genre"}
                 }
-            }
-        }
+            },
+        {
+            'data': [
+                Bar(x = category_names,
+                    y = category_values)
+                ],
+            'layout': {
+                'title': 'Target Category Count',
+                'yaxis': {'title': 'Count',
+                          'type': 'linear'
+                          },
+                'xaxis': {'title': 'Category',
+                            'tickangle': -45,
+                          }
+
+                }
+
+            },
+
     ]
 
     # encode plotly graphs in JSON
