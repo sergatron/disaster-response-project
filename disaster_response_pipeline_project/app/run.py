@@ -94,8 +94,12 @@ def load_data(database_filepath):
     # extract label names
     category_names = Y.columns.to_list()
 
+<<<<<<< HEAD
     return X, Y, df, category_names
 
+=======
+    return X, Y, category_names
+>>>>>>> 352b743dfefaa14086dacbe1ff7fb627caa1953f
 #%%
 # load data
 # engine = create_engine('sqlite:///data/disaster_response.db')
@@ -104,7 +108,11 @@ def load_data(database_filepath):
 # load model
 model = load("models/disaster_clf.pkl")
 
+<<<<<<< HEAD
 X, Y, df, category_names = load_data('data/disaster_response.db')
+=======
+X, Y, category_names = load_data('data/disaster_response.db')
+>>>>>>> 352b743dfefaa14086dacbe1ff7fb627caa1953f
 
 # index webpage displays cool visuals and receives user input text for model
 @app.route('/')
@@ -114,12 +122,25 @@ def index():
 
 
     # extract data needed for visuals
+<<<<<<< HEAD
     genre_counts = df['genre'].value_counts().values
     genre_names = df['genre'].value_counts().index.to_list()
 
     # extract category names and count of each
     category_names = list(Y.sum().sort_values(ascending=False).index)
     category_values = list(Y.sum().sort_values(ascending=False))
+=======
+    # TODO: Below is an example - modify to extract data for your own visuals
+    genre_counts = df['genre'].value_counts().values
+    genre_names = df['genre'].value_counts().index.to_list()
+
+    category_names = list(Y.sum().sort_values(ascending=False)[:10].index)
+    category_values = list(Y.sum().sort_values(ascending=False)[:10])
+
+    categories = df.iloc[:,4:]
+    categories_mean = categories.mean().sort_values(ascending=False)[:10]
+    categories_names = list(categories.sum().sort_values(ascending=False)[:10].index)
+>>>>>>> 352b743dfefaa14086dacbe1ff7fb627caa1953f
 
     # create visuals
     graphs = [
@@ -136,13 +157,20 @@ def index():
                 }
             },
         {
+<<<<<<< HEAD
             'data': [
                 Bar(x = category_names,
                     y = category_values)
+=======
+            'category_data': [
+                Bar(x = categories_mean,
+                    y = categories_names)
+>>>>>>> 352b743dfefaa14086dacbe1ff7fb627caa1953f
                 ],
             'layout': {
                 'title': 'Target Category Count',
                 'yaxis': {'title': 'Count',
+<<<<<<< HEAD
                           'type': 'linear'
                           },
                 'xaxis': {'title': 'Category',
@@ -152,6 +180,16 @@ def index():
                 }
 
             },
+=======
+                          'type': 'linear'},
+                'xaxis': {'title': 'Category',
+                          'tickangle': 45,
+                          'type': 'category'}
+
+                }
+
+            }
+>>>>>>> 352b743dfefaa14086dacbe1ff7fb627caa1953f
 
     ]
 
