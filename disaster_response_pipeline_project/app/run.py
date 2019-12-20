@@ -96,7 +96,6 @@ def load_data(database_filepath):
 
     return X, Y, df, category_names
 
-    return X, Y, category_names
 #%%
 # load data
 # engine = create_engine('sqlite:///data/disaster_response.db')
