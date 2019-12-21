@@ -1,12 +1,13 @@
 import sys
 import os
+import re
 
 import pandas as pd
 import numpy as np
 
 import sqlite3
 from sqlalchemy import create_engine
-
+#%%
 def load_data(messages_filepath, categories_filepath):
     """
     Loads each data set into a pd.DataFrame.
@@ -28,7 +29,7 @@ def load_data(messages_filepath, categories_filepath):
 
 def clean_data(datasets):
     """
-    Performs operations to clean the input dataframe such that
+    Performs operations to clean the input dataframes such that
     the resulting dataframe target array contains 36 categories,
     and one feature column of `messages`.
 
@@ -41,9 +42,15 @@ def clean_data(datasets):
         - Drop duplicates, axis=0
         - Drop missing values, axis=0
 
+    Params:
+    -------
+        datasets: DataFrames
+            Messages and Category DataFrames
+
     Returns:
     --------
-        Clean pd.DataFrame
+        pd.DataFrame
+            Resulting clean DataFrame
 
     """
     # unpack datasets
@@ -102,7 +109,7 @@ def clean_data(datasets):
 def save_data(df, database_filename):
     """
 
-    Load pd.DataFrame into a database with SQLite3.
+    Load pd.DataFrame into a SQLite3 database.
 
     Params:
     -------
@@ -114,6 +121,13 @@ def save_data(df, database_filename):
         NoneType
 
     """
+
+    # extract directory name
+    # dir_ = re.findall(".*/", database_filename)
+
+    # extract table name by stripping away directory name
+    # table_name = database_filename.replace('.db', '')
+
     # Save the clean dataset into an sqlite database.
     conn = sqlite3.connect(f'{database_filename}.db')
 
@@ -121,6 +135,7 @@ def save_data(df, database_filename):
     cur = conn.cursor()
 
     # drop table if already exists
+    print(f'Lookin for table: {database_filename} ...')
     cur.execute(f"DROP TABLE IF EXISTS {database_filename}")
 
     # commit and close connection
@@ -138,7 +153,7 @@ def save_data(df, database_filename):
 def test_database(db_name):
     """
     Test database connection to confirm that it was created
-    and has information in it.
+    and the information is accesible.
 
     Params:
     -------
@@ -149,21 +164,53 @@ def test_database(db_name):
         Prints a sample of the data contained in specified database.
         dtype: NoneType
     """
+    # extract directory name
+    # dir_ = re.findall(".*/", db_name)
+
+    # extract table name by stripping away directory name
+    # table_name = db_name.replace('.db', '')
+
     # test connection to database
     conn = sqlite3.connect(f'{db_name}.db')
     cur = conn.cursor()
+
     try:
         # create the test table including project_id as a primary key
-        df = pd.read_sql(f"SELECT * FROM {db_name}", con=conn)
+        df = pd.read_sql(f'SELECT * FROM {db_name}', con=conn)
         if any(df):
             print(df.sample(5))
             print('Success! Cleaned data saved to database!')
             print('\n\n')
+            conn.commit()
+            conn.close()
     except:
-        print('Database not found')
+        print(f'Database {db_name} not found')
+        conn.commit()
+        conn.close()
 
 
 def main():
+    """
+    Requires Command Line arguments to process data and save
+    to a SQLite3 database.
+
+    Command Line arguments:
+
+        messages_filepath: str,
+            Filepath to messages DataFrame.
+
+        categories_filepath: str,
+            Filepath to categories DataFrame.
+
+        database_filepath: str,
+            Filepath for saving to a SQLite database.
+
+    Returns:
+    --------
+        None.
+
+    """
+
     if len(sys.argv) == 4:
 
         messages_filepath, categories_filepath, database_filepath = sys.argv[1:]
