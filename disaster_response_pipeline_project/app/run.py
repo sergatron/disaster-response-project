@@ -19,13 +19,21 @@ import os
 # os.chdir('../models')
 
 app = Flask(__name__)
+
 #%%
 def tokenize(text):
     """
-    Replace `url` with empty space "".
-    Tokenize and lemmatize input `text`.
-    Converts to lower case and strips whitespaces.
 
+    Applies the following steps to process input `text`.
+    1. Replace `url` with empty space.
+    2. Remove stopwords.
+    3. Tokenize and lemmatize input `text`.
+    4. Converts to lower case and strips whitespaces.
+
+    Params:
+    -------
+        text: str
+            string to process by applying above steps
 
     Returns:
     --------
@@ -63,10 +71,14 @@ def load_data(database_filepath):
     Preprocess data.
 
     Params:
+    -------
         database_filepath: file path of database
 
     Returns:
-        pd.DataFrame of features and predictors, `X` and `Y`, respectively.
+    --------
+        pd.DataFrame; (X, Y, df, category_names)
+        Features and predictors, `X` and `Y`, respectively.
+        Original DataFrame, `df`, and named of target labels
     """
 
     # extract directory name
@@ -110,7 +122,11 @@ X, Y, df, category_names = load_data('data/disaster_response.db')
 @app.route('/')
 @app.route('/index')
 def index():
+    """
+    Renders graphs created from the loaded data.
+    Renders homepage with visualizations of the data.
 
+    """
 
 
     # extract data needed for visuals
@@ -166,6 +182,11 @@ def index():
 # web page that handles user query and displays model results
 @app.route('/go')
 def go():
+    """
+    Renders a page which takes in user's query then passes
+    the query to the model which makes predictions and outputs
+    the labels to screen.
+    """
     # save user input in query
     query = request.args.get('query', '')
 
