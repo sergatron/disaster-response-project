@@ -60,13 +60,14 @@ Copy repo:
 
 ```$ git clone https://github.com/sergatron/disaster-response-project.git```
 
-Execute script to proccess data:
 
-```python data/process_data.py data/disaster_messages.csv data/disaster_categories.csv data/DisasterResponse.db```
+From 'data/' directory, execute script to proccess data; the last argument provides name for your database:
+
+```python process_data.py disaster_messages.csv disaster_categories.csv <database_name>```
 
 Train classifier:
 
-```python models/train_classifier.py data/DisasterResponse.db models/my_model.pkl```
+```python models/train_classifier.py data/<database_name>.db models/<your_model>.pkl```
 
 Run web app:
 
