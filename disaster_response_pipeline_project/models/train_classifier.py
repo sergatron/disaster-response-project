@@ -12,8 +12,8 @@ import pandas as pd
 import time
 
 import nltk
-nltk.download(['stopwords', 'punkt', 'wordnet', 'averaged_perceptron_tagger',
-              'maxent_ne_chunker', 'words', 'word2vec_sample'])
+# nltk.download(['stopwords', 'punkt', 'wordnet', 'averaged_perceptron_tagger',
+#               'maxent_ne_chunker', 'words', 'word2vec_sample'])
 
 
 from sqlalchemy import create_engine
@@ -29,10 +29,13 @@ from sklearn import svm
 from sklearn.linear_model import LogisticRegression
 
 from sklearn.ensemble import (RandomForestClassifier,
+                              ExtraTreesClassifier,
                               BaggingClassifier,
                               RandomTreesEmbedding,
-                              GradientBoostingClassifier
+                              StackingClassifier
                               )
+
+
 
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.multiclass import OneVsRestClassifier
@@ -42,7 +45,8 @@ from sklearn.multiclass import OneVsRestClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV
 
 from sklearn.pipeline import Pipeline, FeatureUnion
-from sklearn.preprocessing import Normalizer, QuantileTransformer
+from sklearn.preprocessing import (Normalizer, QuantileTransformer,
+                                   PolynomialFeatures)
 
 from sklearn.compose import ColumnTransformer
 
@@ -61,20 +65,28 @@ from sklearn.neighbors import (KNeighborsClassifier,
 
 from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
                              recall_score, classification_report,
-                             roc_curve, auc, accuracy_score, make_scorer)
+                             accuracy_score, make_scorer)
 
 from sklearn.utils import resample
 
-# from custom_tx import tokenize
+# from custom_txt.custom_transform import (KeywordSearch, StartingVerbExtractor,
+#                               GetVerbNounCount, EntityCount)
 
 #%%
 
 def tokenize(text):
     """
-    Replace `url` with empty space "".
-    Tokenize and lemmatize input `text`.
-    Converts to lower case and strips whitespaces.
 
+    Applies the following steps to process input `text`.
+    1. Replace `url` with empty space.
+    2. Remove stopwords.
+    3. Tokenize and lemmatize input `text`.
+    4. Converts to lower case and strips whitespaces.
+
+    Params:
+    -------
+        text: str
+            string to process by applying above steps
 
     Returns:
     --------
@@ -89,14 +101,11 @@ def tokenize(text):
     # load stopwords
     stop_words = stopwords.words("english")
 
-    # remove additional words
-    remove_words = ['one', 'reason', 'see']
-    for addtl_word in remove_words:
-        stop_words.append(addtl_word)
 
-    # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
-    # tokenize resulting text
+    # remove punctuations (retain alphabetical and numeric chars) and convert
+    # to all lower case tokenize resulting text
     tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
+
     lemm = WordNetLemmatizer()
     # lemmatize and remove stop words
     lemmatized = [lemm.lemmatize(word) for word in tokens if word not in stop_words]
@@ -108,21 +117,34 @@ def tokenize(text):
 def load_data(database_filepath):
     """
     Import data from database into a DataFrame. Split DataFrame into
-    features and predictors, `X` and `Y`.
+    features and predictors, `X` and `Y`. Additionally, extract the names
+    of target categories.
 
     Preprocess data.
 
     Params:
+    -------
         database_filepath: file path of database
 
     Returns:
+    -------
+        tuple(X, Y, category_names)
         pd.DataFrame of features and predictors, `X` and `Y`, respectively.
+        List of target category names
     """
-    engine = create_engine('sqlite:///data/disaster_response.db')
-    df = pd.read_sql_table('disaster_response', engine)
 
-    #           *** TEMPORARY SAMPLE TO TEST SCRIPT ***
-    df = df.sample(3000)
+    engine = create_engine(f'sqlite:///{database_filepath}')
+
+    # extract directory name
+    dir_ = re.findall(".*/", database_filepath)
+
+    # extract table name by stripping away directory name
+    table_name = database_filepath.replace('.db', '').replace(dir_[0], "")
+
+    df = pd.read_sql_table(f'{table_name}', engine)
+
+    # Sample data
+    df = df.sample(24000)
 
     # explore `related` feature where its labeled as a `2`
     related_twos = df[df['related'] == 2]
@@ -143,24 +165,47 @@ def load_data(database_filepath):
 #%%
 
 def grid_search(model):
-    rf = RandomForestClassifier()
-    gb = GradientBoostingClassifier()
-    bg = BaggingClassifier()
+    """
+
+    Performs GridSearch to find the best Hyperparameters to maximize
+    the F1-score (weighted).
+
+    Params:
+    ----------
+        model: pipeline object
+
+    Returns:
+    -------
+        grid_cv: GridSearch object
+
+    """
+    N_JOBS = 1
+    ext = ExtraTreesClassifier(n_estimators=10,
+                               n_jobs=6,
+                               class_weight='balanced')
+    bg = BaggingClassifier(n_jobs=6)
 
     grid_params = [
         # {
-        #     'clf__estimator': [rf],
-        #     'clf__estimator__n_estimators': [120],
-        #     # 'clf__estimator__max_depth': [3],
-        #     'count_vec__max_features': [50, 100, 300],
+        #     'clf__estimator': [ext],
+        #     'clf__estimator__n_estimators': [100],
+        #     # 'clf__estimator__max_depth': [None, 2, 3],
+        #     # 'clf__estimator__bootstrap': [True, False],
+        #     'clf__estimator__n_jobs': [6],
+        #     'clf__estimator__random_state': [11]
         #     },
 
         {
             'clf__estimator': [bg],
-            'clf__estimator__n_estimators': [60],
-            'clf__estimator__max_samples': [1.0],
-            'clf__estimator__n_jobs': [-1],
-            'count_vect__ngram_range': [(1, 1), (1, 2), (1, 3)],
+            'clf__estimator__n_estimators': [100, 110, 120],
+            # 'decomp__n_components': [2, 3],
+            # 'clf__estimator__max_samples': [0.7, 0.8, 1.0],
+            # 'clf__estimator__max_features': [0.7, 0.8, 1.0],
+            # 'clf__estimator__bootstrap_features': [True, False],
+            # 'clf__estimator__bootstrap': [True, False],
+            # 'vectorizer__ngram_range': [(1,2), (1,3), (2,2)],
+            'clf__estimator__n_jobs': [6],
+            'clf__estimator__random_state': [11]
             }
         ]
 
@@ -170,38 +215,97 @@ def grid_search(model):
         grid_params,
         cv=3,
         scoring='f1_weighted',
-        n_jobs=1,
+        n_jobs=N_JOBS,
     )
 
     return grid_cv
 
 def build_model():
+    """
 
+    Creates a Pipeline object with preset initial params for estimators
+    and classifier.
 
-    rf_params = dict(
-        n_estimators=40,
-        max_depth=5,
-        class_weight='balanced',
-        n_jobs=-1,
+    Returns:
+    -------
+        Pipeline object
+
+    """
+    N_JOBS = 6
+    bg_params = dict(
+        n_estimators=105,
+        n_jobs=N_JOBS,
         random_state=11
         )
-    # clf = svm.SVC(**svc_params)
-    clf = RandomForestClassifier(**rf_params)
+    ext_params = dict(
+        n_estimators=105,
+        n_jobs=N_JOBS,
+        random_state=11
+        )
+    # rf_params = dict(
+    #     n_estimators=40,
+    #     max_depth=2,
+    #     class_weight='balanced',
+    #     n_jobs=N_JOBS,
+    #     random_state=11
+    #     )
+    # rt_params = dict(
+    #     n_estimators=30,
+    #     max_depth=3,
+    #     n_jobs = N_JOBS,
+    #     random_state = 11
+    #     )
+
+    clf = BaggingClassifier(**bg_params)
+    # clf = RandomForestClassifier(**rf_params)
+    # clf = ExtraTreesClassifier(**ext_params)
 
     count_vec = CountVectorizer(
-                tokenizer=tokenize,
-                ngram_range=(1, 2),
-                )
-    tfidf = TfidfTransformer()
+        tokenizer=tokenize,
+        ngram_range=(1, 1),
+        # max_features=50
+        )
+    hash_vec = HashingVectorizer(
+        tokenizer=tokenize,
+        ngram_range=(1, 1),
+        n_features=50,
+        )
 
     # build pipeline
     pipeline = Pipeline([
-        ('count_vect', count_vec),
-        ('tfidf_tx', tfidf),
+        ('vectorizer', count_vec),
+        ('tfidf_tx', TfidfTransformer()),
+        # ('norm', Normalizer(norm='l2', copy=False)),
+        # ('poly', PolynomialFeatures(degree=2, interaction_only=True)),
+
         ('decomp', TruncatedSVD(n_components=2,
                                 random_state=11)),
-        ('clf', MultiOutputClassifier(clf, n_jobs=-1))
+        ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
     ])
+
+    # pipeline = Pipeline([
+
+    # ('features', FeatureUnion([
+    #         ('text_pipeline', Pipeline([
+    #                 ('count_vect', count_vec)
+    #                 ])),
+
+    #         # ('keywords', KeywordSearch()),
+    #         # ('verb_noun_count', GetVerbNounCount()),
+    #         # ('entity_count', EntityCount()),
+    #         # ('verb_extract', StartingVerbExtractor()),
+
+
+    # ], n_jobs=1)),
+
+    # ('tfidf_tx', tfidf),
+    # ('norm', Normalizer(norm='l2', copy=False)),
+    # ('decomp', TruncatedSVD(n_components=3,
+    #                         random_state=11)),
+    # # ('rt', RandomTreesEmbedding(**rt_params)),
+    # ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
+    # ])
+
 
     # return grid search object
     return grid_search(pipeline)
@@ -210,6 +314,37 @@ def build_model():
 
 
 def evaluate_model(model, x_test, y_test, category_names):
+    """
+    Makes predictions on the `x_test` and calculates metrics, `Accuracy`,
+    `Precision`, `Recall`, and `F1-score`.
+
+    Inputs `x_test`, and `y_test` are used to compute the scores.
+
+    Results for each label are stored in pd.DataFrame. Scores are
+    aggregated and printed to screen.
+
+
+    Params:
+    -------
+    model : Pipeline object
+        Pipeline to use for making predictions.
+
+    x_test : numpy array
+        Predictors test set.
+
+    y_test : numpy array
+        Target variables.
+
+    category_names : list
+        List of target variable names.
+
+    Returns:
+    -------
+        NoneType. Simply prints out the scores for each label including
+        aggregated scores mean, median and standard deviation.
+
+    """
+
     y_pred = model.predict(x_test)
     # print label and f1-score for each
     avg = 'weighted'
@@ -238,6 +373,7 @@ def evaluate_model(model, x_test, y_test, category_names):
     print('='*75)
     print(f1_df)
     print('\n')
+    print('Test Data Results:')
     print(f1_df.agg(['mean', 'median', 'std']))
     print('='*75)
     print('\n')
@@ -245,18 +381,39 @@ def evaluate_model(model, x_test, y_test, category_names):
 
 
 def show_info(X_train, y_train):
+    """
+    Simply prints the shape of predictors and target arrays.
+
+    Params:
+    -------
+    X_train : numpy array
+        Predictors training subset.
+
+    y_train : numpy array
+        Target variables training subset.
+
+    Returns:
+    -------
+        NoneType. Prints out the shape of predictors and target arrays.
+
+    """
     print("X-shape:", X_train.shape)
     print("Y-shape:", y_train.shape)
 
 def save_model(model, filepath):
     """
-    Parameters
-    ----------
-        model : estimator
 
-        filepath : save model to this directory
+    Pickles model to given file path.
 
-    Returns
+    Params:
+    -------
+        model: Pipeline
+            Model to pickle.
+
+        filepath: str
+            save model to this directory
+
+    Returns:
     -------
         None.
 
@@ -265,11 +422,32 @@ def save_model(model, filepath):
         dump(model, filepath)
     except Exception as e:
         print(e)
-        print('Failed to pickle model')
+        print('Failed to pickle model.')
 
 
 #%%
 def main():
+    """
+    Command Line arguments:
+
+        database_filepath: str,
+            Filepath to database.
+
+        model_filepath: str,
+            Filepath to save model.
+
+    Performs the following:
+        1. Loads data from provided file path of Database file.
+        2. Splits data into training and test subsets.
+        3. Trains model and performs GridSearch.
+        4. Evaluates model on testing subset.
+        5. Saves model to filepath.
+
+    Returns
+    -------
+        None. Prints results to screen.
+
+    """
     if len(sys.argv) == 3:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
@@ -281,8 +459,7 @@ def main():
             X, Y, category_names = load_data(database_filepath)
             X_train, X_test, y_train, y_test = train_test_split(X.values,
                                                                 Y.values,
-                                                                stratify=Y['floods'].values,
-                                                                test_size=0.2)
+                                                                test_size=0.3)
 
             show_info(X_train, y_train)
 
@@ -293,14 +470,16 @@ def main():
             print('\nTraining model...')
             model.fit(X_train.ravel(), y_train)
             end_time = time.perf_counter()
+            print('\nTraining time:', np.round((end_time - start_time)/60, 4), 'min')
 
             print('\nEvaluating model...')
             evaluate_model(model, X_test.ravel(), y_test, category_names)
 
-            print('\nBest model:', model.best_estimator_)
-            print('Best params:', model.best_params_)
+            # print('\nBest model:', model.best_estimator_)
+            print('\nBest params:', model.best_params_)
+            print('\nBest score:', model.best_score_)
 
-            print('\nTraining time:', np.round((end_time - start_time)/60, 4), 'min')
+            print('Mean scores:', model.cv_results_['mean_test_score'])
 
             print('\nSaving model...\n    MODEL: {}'.format(model_filepath))
             save_model(model, model_filepath)
