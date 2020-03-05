@@ -9,6 +9,20 @@ The outcome of this project provides a platform (web application) for an emergen
 
 For example, a message is entered, "we need food and clothing". The output would produce a positive instance in the following categories, "Request", "Food", and "Clothing". 
 
+### Home Page
+
+Displays some visuals and requests user's query for prediction.
+
+![](disaster_response_pipeline_project/img/app_index.png)
+
+### Predictions Page
+
+Predicted categories are highlighted.
+
+![](disaster_response_pipeline_project/img/app_predict.png)
+
+
+
 # Structure
 ```
 disaster_response_project
