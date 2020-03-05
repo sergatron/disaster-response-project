@@ -3,6 +3,12 @@
 ## Motivation
 The goal of this project is to classify raw text disaster messages such that they can be forwarded automatically to appropriate relief agencies. This is something that is overwhelming for humans to classify when there may be thousands of messages coming in every minute. 
 
+There are 36 categories associated with each message. Some of the categories include "Food", "Water", "Shelter", "Security", etc. Each message can be classiffied with multiple categories since each one may be requesting a variety of aid or service. 
+
+The outcome of this project provides a platform (web application) for an emergency worker to enter a message for classification. The resulting output is a classification of multiple categories that the message relates to. 
+
+For example, a message is entered, "we need food and clothing". The output would produce a positive instance in the following categories, "Request", "Food", and "Clothing". 
+
 # Structure
 ```
 disaster_response_project
