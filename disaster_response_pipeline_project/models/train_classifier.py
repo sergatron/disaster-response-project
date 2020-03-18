@@ -42,7 +42,7 @@ from sklearn.multiclass import OneVsRestClassifier
 
 
 
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
 
 from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn.preprocessing import (Normalizer, QuantileTransformer,
@@ -65,12 +65,14 @@ from sklearn.neighbors import (KNeighborsClassifier,
 
 from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
                              recall_score, classification_report,
-                             accuracy_score, make_scorer)
+                             accuracy_score, make_scorer, log_loss)
 
 from sklearn.utils import resample
 
-# from custom_txt.custom_transform import (KeywordSearch, StartingVerbExtractor,
-#                               GetVerbNounCount, EntityCount)
+from sklearn.neural_network import MLPClassifier
+
+from custom_transform import (KeywordSearch, StartingVerbExtractor,
+                              GetVerbNounCount, EntityCount)
 
 #%%
 
@@ -144,7 +146,7 @@ def load_data(database_filepath):
     df = pd.read_sql_table(f'{table_name}', engine)
 
     # Sample data
-    df = df.sample(24000)
+    df = df.sample(5000)
 
     # explore `related` feature where its labeled as a `2`
     related_twos = df[df['related'] == 2]
@@ -231,9 +233,9 @@ def build_model():
         Pipeline object
 
     """
-    N_JOBS = 6
+    N_JOBS = -1
     bg_params = dict(
-        n_estimators=105,
+        n_estimators=60,
         n_jobs=N_JOBS,
         random_state=11
         )
@@ -242,73 +244,77 @@ def build_model():
         n_jobs=N_JOBS,
         random_state=11
         )
-    # rf_params = dict(
-    #     n_estimators=40,
-    #     max_depth=2,
-    #     class_weight='balanced',
-    #     n_jobs=N_JOBS,
-    #     random_state=11
-    #     )
-    # rt_params = dict(
-    #     n_estimators=30,
-    #     max_depth=3,
-    #     n_jobs = N_JOBS,
-    #     random_state = 11
-    #     )
+    rf_params = dict(
+        n_estimators=140,
+        # max_depth=2,
+        class_weight='balanced',
+        n_jobs=N_JOBS,
+        random_state=11
+        )
+    rt_params = dict(
+        n_estimators=30,
+        max_depth=3,
+        n_jobs = N_JOBS,
+        random_state = 11
+        )
 
-    clf = BaggingClassifier(**bg_params)
+    clf = MLPClassifier(random_state=11,
+                        hidden_layer_sizes=(200,),
+                        alpha=0.00001,
+                        learning_rate='adaptive',
+                        activation='relu',
+                        max_iter=300)
+
+    # clf = BaggingClassifier(**bg_params)
     # clf = RandomForestClassifier(**rf_params)
     # clf = ExtraTreesClassifier(**ext_params)
 
     count_vec = CountVectorizer(
         tokenizer=tokenize,
         ngram_range=(1, 1),
-        # max_features=50
+        # max_features=200
         )
     hash_vec = HashingVectorizer(
         tokenizer=tokenize,
         ngram_range=(1, 1),
-        n_features=50,
+        n_features=200,
         )
 
-    # build pipeline
-    pipeline = Pipeline([
-        ('vectorizer', count_vec),
-        ('tfidf_tx', TfidfTransformer()),
-        # ('norm', Normalizer(norm='l2', copy=False)),
-        # ('poly', PolynomialFeatures(degree=2, interaction_only=True)),
-
-        ('decomp', TruncatedSVD(n_components=2,
-                                random_state=11)),
-        ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
-    ])
-
+    # # build pipeline
     # pipeline = Pipeline([
-
-    # ('features', FeatureUnion([
-    #         ('text_pipeline', Pipeline([
-    #                 ('count_vect', count_vec)
-    #                 ])),
-
-    #         # ('keywords', KeywordSearch()),
-    #         # ('verb_noun_count', GetVerbNounCount()),
-    #         # ('entity_count', EntityCount()),
-    #         # ('verb_extract', StartingVerbExtractor()),
+    #     ('vectorizer', count_vec),
+    #     ('tfidf_tx', TfidfTransformer()),
+    #     # ('norm', Normalizer(norm='l2', copy=False)),
 
 
-    # ], n_jobs=1)),
-
-    # ('tfidf_tx', tfidf),
-    # ('norm', Normalizer(norm='l2', copy=False)),
-    # ('decomp', TruncatedSVD(n_components=3,
-    #                         random_state=11)),
-    # # ('rt', RandomTreesEmbedding(**rt_params)),
-    # ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
+    #     ('decomp', TruncatedSVD(n_components=3,
+    #                             random_state=11)),
+    #     # ('poly', PolynomialFeatures(degree=10, interaction_only=False)),
+    #     ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
     # ])
 
+    pipeline = Pipeline([
 
-    # return grid search object
-    return grid_search(pipeline)
+    ('features', FeatureUnion([
+            ('text_pipeline', Pipeline([
+                    ('count_vect', count_vec)
+                    ])),
+
+            ('keywords', KeywordSearch()),
+            ('verb_noun_count', GetVerbNounCount()),
+            # ('entity_count', EntityCount()),
+            # ('verb_extract', StartingVerbExtractor()),
+
+
+    ], n_jobs=1)),
+
+    ('tfidf_tx', TfidfTransformer()),
+    ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
+    ])
+
+
+    # # return grid search object
+    return pipeline
 
 
 
@@ -459,7 +465,7 @@ def main():
             X, Y, category_names = load_data(database_filepath)
             X_train, X_test, y_train, y_test = train_test_split(X.values,
                                                                 Y.values,
-                                                                test_size=0.3)
+                                                                test_size=0.2)
 
             show_info(X_train, y_train)
 
@@ -476,10 +482,20 @@ def main():
             evaluate_model(model, X_test.ravel(), y_test, category_names)
 
             # print('\nBest model:', model.best_estimator_)
-            print('\nBest params:', model.best_params_)
-            print('\nBest score:', model.best_score_)
+            if hasattr(model, 'best_params_'):
+                print('\nBest params:', model.best_params_)
+                print('\nBest score:', model.best_score_)
+                print('Mean scores:', model.cv_results_['mean_test_score'])
 
-            print('Mean scores:', model.cv_results_['mean_test_score'])
+            print('\nCross-validating...\n')
+            scores = cross_val_score(
+                model,
+                X_train.ravel(),
+                y_train,
+                scoring='f1_weighted',
+                cv=3,
+                n_jobs=-1)
+            print('\nCross-val scores:\n', scores)
 
             print('\nSaving model...\n    MODEL: {}'.format(model_filepath))
             save_model(model, model_filepath)

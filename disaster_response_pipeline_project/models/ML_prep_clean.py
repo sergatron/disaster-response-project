@@ -15,6 +15,7 @@ import nltk
 #               'maxent_ne_chunker', 'words', 'word2vec_sample'])
 
 # import libraries
+import dill as pickle
 import re
 import numpy as np
 import pandas as pd
@@ -45,7 +46,7 @@ from sklearn.multiclass import OneVsRestClassifier
 
 from sklearn.naive_bayes import GaussianNB, BernoulliNB
 
-from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
+from sklearn.model_selection import train_test_split, KFold, GridSearchCV, cross_val_score
 from sklearn.preprocessing import PolynomialFeatures
 
 from sklearn.pipeline import Pipeline, FeatureUnion
@@ -74,13 +75,15 @@ from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
 
 from sklearn.utils import resample
 
-from models.custom_tx import (StartingVerbExtractor,
+from custom_transform import (StartingVerbExtractor,
                               KeywordSearch,
                               EntityCount,
                               GetVerbNounCount,
                               tokenize,
-                              Dense
+                              Dense,
+                              SentenceVector
                               )
+
 
 
 # In[3]:
@@ -136,7 +139,7 @@ def load_data(database_filepath):
 
 #%%
 # load data from database
-engine = create_engine('sqlite:///../data/disaster_response.db')
+engine = create_engine('sqlite:///data/disaster_response.db')
 df = pd.read_sql_table('disaster_response', engine)
 
 
@@ -195,79 +198,125 @@ df.loc[idx, 'message':]
 
 
 #%%
+from spellchecker import SpellChecker
 
-## CHECK BALANCE
-#before = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
-#
-## DROP INDEX
-#df.drop(index=drop_idx, inplace=True)
-#
-## CHECK BALANCE, AGAIN
-#after = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
-#
-#np.c_[before, after]
-#
-## REPLACE `related` with zeros
-#df['related'].replace(to_replace=1, value=0, inplace=True)
-#df['related'].sum()
+spell = SpellChecker()
 
+# find those words that may be misspelled
+misspelled = spell.unknown(['something', 'is', 'hapenning', 'here'])
+
+for word in misspelled:
+    # Get the one `most likely` answer
+    print(spell.correction(word))
+
+    # Get a list of `likely` options
+    print(spell.candidates(word))
+
+idx = 15
+df.loc[idx, 'message']
+df.loc[idx, 'related':]
 
 #%%
-#def tokenize(text):
-#    """
-#    Replace `url` with empty space "".
-#    Tokenize and lemmatize input `text`.
-#    Converts to lower case and strips whitespaces.
-#
-#
-#    Returns:
-#    --------
-#        dtype: list, containing processed words
-#    """
-#    url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-#
-#    detected_urls = re.findall(url_regex, text)
-#    for url in detected_urls:
-#        text = text.replace(url, "")
-#
-#    # load stopwords
-#    stop_words = stopwords.words("english")
-#
-#    # remove additional words
-#    remove_words = ['one', 'reason', 'see']
-#    for addtl_word in remove_words:
-#        stop_words.append(addtl_word)
-#
-#    # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
-#    # tokenize resulting text
-#    tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
-#
-#    # lemmatize and remove stop words
-#    lemmatized = [WordNetLemmatizer().lemmatize(word) for word in tokens if word not in stop_words]
-#
-#    return lemmatized
 
+### COMBINE OUTPUT CATEGORIES
+
+
+# Combine Weather
+(df['weather_related'] + df['other_weather']).unique()
+
+df.loc[:, 'related':].sum(axis=1)
 
 
 #%%
 
-#idx = 142
-#msg = df.loc[idx, 'message']
-#df.loc[idx, 'related':]
-#print(msg)
-#
-#
-## tokenize, pos tag, then recognize named entities in text
-#tree = ne_chunk(pos_tag(word_tokenize(msg)))
-#print(tree)
-#
-#ne_list = ['GPE', 'PERSON', 'ORGANIZATION']
-#ne_labels = []
-#for item in tree.subtrees():
-#    ne_labels.append(item.label())
-#
-## FOUND ENTITIES
-#pd.Series(ne_list).isin(ne_labels).astype(np.int32).values
+# FIND ROWS WITH NO POSITIVE INSTANCES
+
+# where sum across entire row is less than 1
+null_idx = np.where(df.loc[:, 'related':].sum(axis=1) < 1)[0]
+
+# drop rows which contain all null values
+df.drop(null_idx, axis=0, inplace=True)
+
+
+#%%
+
+# # CHECK BALANCE
+# before = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
+
+# # DROP INDEX
+# df.drop(index=drop_idx, inplace=True)
+
+# # CHECK BALANCE, AGAIN
+# after = (df.loc[:, 'related':].sum() / df.loc[:, 'related':].shape[0]).sort_values()
+
+# np.c_[before, after]
+
+# # REPLACE `related` with zeros
+# df['related'].replace(to_replace=1, value=0, inplace=True)
+# df['related'].sum()
+
+
+#%%
+
+def tokenize(text):
+    """
+
+    Applies the following steps to process input `text`.
+    1. Replace `url` with empty space.
+    2. Remove stopwords.
+    3. Tokenize and lemmatize input `text`.
+    4. Converts to lower case and strips whitespaces.
+
+    Params:
+    -------
+        text: str
+            string to process by applying above steps
+
+    Returns:
+    --------
+        dtype: list, containing processed words
+    """
+    url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+
+    detected_urls = re.findall(url_regex, text)
+    for url in detected_urls:
+        text = text.replace(url, "")
+
+    # load stopwords
+    stop_words = stopwords.words("english")
+
+
+    # remove punctuations (retain alphabetical and numeric chars) and convert
+    # to all lower case tokenize resulting text
+    tokens = word_tokenize(re.sub(r"[^a-zA-Z]", ' ', text.lower().strip()))
+
+    lemm = WordNetLemmatizer()
+    # lemmatize and remove stop words
+    lemmatized = [lemm.lemmatize(word) for word in tokens if word not in stop_words]
+
+    return lemmatized
+
+
+
+#%%
+
+idx = 99
+msg = df.loc[idx, 'message']
+df.loc[idx, 'related':]
+print(msg)
+
+
+# tokenize, pos tag, then recognize named entities in text
+tree = ne_chunk(pos_tag(word_tokenize(msg)))
+print(tree)
+
+ne_list = ['GPE', 'PERSON', 'ORGANIZATION']
+ne_labels = []
+for item in tree.subtrees():
+    ne_labels.append(item.label())
+
+# FOUND ENTITIES
+pd.Series(ne_list).isin(ne_labels).astype(np.int32).values
 
 
 #%%
@@ -279,42 +328,43 @@ df.loc[idx, 'message':]
 
 
 # In[30]:
-
+N_JOBS = -1
 
 # LogisticRegression params
 lg_params = dict(
-    C = 2,
+    C = 12,
     solver = 'newton-cg',
     penalty = 'l2',
-    class_weight = {0: 1, 1: 500},
+    class_weight = 'balanced',
     multi_class = 'multinomial',
-    n_jobs = 6,
+    n_jobs = N_JOBS,
     random_state = 11
 
 )
 
 
 svc_params = dict(
-    C = 4,
+    C = 2,
     kernel = 'linear',
 #    gamma = 0.002,
     cache_size = 1000,
-    class_weight = {0: 1, 1: 500},
+    class_weight = 'balanced',
     random_state = 11
 
 )
 
 rt_params = dict(
-        n_estimators = 20,
-        n_jobs = 6,
+        n_estimators=300,
+        max_depth=10,
+        n_jobs = N_JOBS,
         random_state = 11
         )
 rf_params = dict(
-        n_estimators=50,
+        n_estimators=40,
         max_depth=4,
         # min_samples_split=10,
-        class_weight={0: 1, 1: 600},
-        n_jobs=6,
+        class_weight='balanced',
+        n_jobs=N_JOBS,
         random_state=11
         )
 
@@ -322,6 +372,7 @@ rf_params = dict(
 clf = LogisticRegression(**lg_params)
 # clf = svm.SVC(**svc_params)
 # clf = RandomForestClassifier(**rf_params)
+#
 
 # pipeline = Pipeline([
 #         ('count_vect', CountVectorizer(
@@ -339,8 +390,7 @@ pipeline = Pipeline([
             ('text_pipeline', Pipeline([
                     ('count_vect', CountVectorizer(
                             tokenizer=tokenize,
-                            ngram_range=(1, 2),
-                            # max_features=300
+                            ngram_range=(1, 1),
                             ))
                     ])),
 
@@ -350,22 +400,19 @@ pipeline = Pipeline([
             # ('verb_extract', StartingVerbExtractor()),
 
 
-    ], n_jobs=-1)),
+    ], n_jobs=N_JOBS)),
 
     ('tfidf_tx', TfidfTransformer()),
     # ('quantile_tx', QuantileTransformer(output_distribution='normal',
     #                                     random_state=11)),
-    # ('decomp', TruncatedSVD(n_components=3,
+    # ('decomp', TruncatedSVD(n_components=2,
     #                         random_state=11)),
     # ('rt', RandomTreesEmbedding(**rt_params)),
-    ('dense', Dense()),
+    # ('dense', Dense()),
     # ('poly', PolynomialFeatures(degree=3, interaction_only=True)),
-    ('scale', RobustScaler()),
-#    ('cat', genre_pipe),
-    ('clf', MultiOutputClassifier(clf, n_jobs=6))
-    ],
-    memory='models/cache'
-    )
+    # ('scale', RobustScaler(with_centering=False)),
+    ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
+    ])
 
 # use ColumnTransfomer to combine transformations
 # NOTE:
@@ -390,8 +437,9 @@ Y = df.loc[:, 'related':]
 
 # DEFINE `X` AND `Y` AGAIN
 sample_it = True
+n_samples = 10000
 if sample_it:
-    sampler = df.sample(3000)
+    sampler = df.sample(n_samples)
     X = sampler.loc[:, 'message']
     Y = sampler.loc[:, 'related':]
 
@@ -414,7 +462,7 @@ Y.drop(Y.nunique()[Y.nunique() < 2].index.tolist(), axis=1, inplace=True)
 
 X_train, X_test, y_train, y_test = train_test_split(X.values,
                                                     Y.values,
-                                                    stratify=Y['offer'].values,
+                                                    # stratify=Y['offer'].values,
                                                     test_size=0.15)
 
 
@@ -431,9 +479,10 @@ y_pred = pipeline.predict(X_test.ravel())
 
 end_time = time.perf_counter()
 
-print('\n---')
+print('\n')
+print('-'*75)
 print('Training time:', np.round((end_time - start_time)/60, 4), 'min')
-print('\n---')
+print('\n')
 
 # ### 5. Test your model
 # Report the f1 score, precision and recall for each output category of the dataset. You can do this by iterating through the columns and calling sklearn's `classification_report` on each.
@@ -468,22 +517,33 @@ print(f1_df.agg(['mean', 'median', 'std']))
 print('='*75)
 print('\n')
 
+f1_df['f1-score'].mean()
+
 
 #%%
-with open('results.txt', 'a') as file:
-    file.write('\n\n')
-    file.write(str(time.localtime()))
-    file.write(('-'*100))
-    file.write(str(pipeline.get_params()))
-    file.write('\n\n')
-    file.write(str(f1_df))
-    file.write('\n\n')
-    file.write(str(f1_df.agg(['mean', 'median', 'std'])))
-    file.write('\n\n')
-    file.write(('-'*100))
-    file.write('\n\n')
+print('\nCross-validating...\n')
+scores = cross_val_score(
+    pipeline,
+    X_train.ravel(),
+    y_train,
+    scoring='f1_weighted',
+    cv=3,
+    n_jobs=N_JOBS)
+print('\nCross-val scores:\n', scores)
 
-
+#%%
+# with open('results.txt', 'a') as file:
+#     file.write('\n\n')
+#     file.write(str(time.localtime()))
+#     file.write(('-'*100))
+#     file.write(str(pipeline.get_params()))
+#     file.write('\n\n')
+#     file.write(str(f1_df))
+#     file.write('\n\n')
+#     file.write(str(f1_df.agg(['mean', 'median', 'std'])))
+#     file.write('\n\n')
+#     file.write(('-'*100))
+#     file.write('\n\n')
 
 
 # ### 6. Improve your model
@@ -519,59 +579,59 @@ with open('results.txt', 'a') as file:
 
 # GRID-SEARCH HYPERPARAMS
 
-print('Performing GridSearch. Please be patient ...')
-grid_params = {
-        'clf__estimator__C': [2, 4],
-#        'clf__estimator__n_estimators': [80, 120, 150],
-#        'clf__estimator__class_weight': [{0: 1, 1: 500},
-#                                         {0: 1, 1: 300},]
+# print('Performing GridSearch. Please be patient ...')
+# grid_params = {
+#         'clf__estimator__C': [2, 4],
+# #        'clf__estimator__n_estimators': [80, 120, 150],
+# #        'clf__estimator__class_weight': [{0: 1, 1: 500},
+# #                                         {0: 1, 1: 300},]
 
-}
+# }
 
-grid_cv = GridSearchCV(
-    pipeline,
-    grid_params,
-    cv=3,
-    scoring='f1_weighted',
-    n_jobs=2,
-)
-grid_cv.fit(X_train.ravel(), y_train)
-
-
-print('Using best params...')
-print(grid_cv.best_params_)
-
-y_pred = grid_cv.predict(X_test.ravel())
-
-print('Scoring model using tuned params...')
-# print label and f1-score for each
-avg = 'weighted'
-labels = Y.columns.tolist()
-f1 = []
-prec = []
-rec = []
-acc = []
-#train_scores = []
-for i in range(y_test[:, :].shape[1]):
-    f1.append(f1_score(y_test[:, i], y_pred[:, i], average=avg))
-    acc.append(accuracy_score(y_test[:, i], y_pred[:, i]))
-    rec.append(recall_score(y_test[:, i], y_pred[:, i], average=avg))
-    prec.append(precision_score(y_test[:, i], y_pred[:, i], average=avg))
-
-# summarize f1-scores and compare to the rate of positive class occurance
-f1_df = pd.DataFrame({'f1-score': np.round(f1, 4),
-                      'precision': np.round(prec, 4),
-                      'recall': np.round(rec, 4),
-                      'accuracy': np.round(acc, 4)}, index=labels)
+# grid_cv = GridSearchCV(
+#     pipeline,
+#     grid_params,
+#     cv=3,
+#     scoring='f1_weighted',
+#     n_jobs=2,
+# )
+# grid_cv.fit(X_train.ravel(), y_train)
 
 
-print('\n')
-print('='*75)
-print(f1_df)
-print('\n')
-print(f1_df.agg(['mean', 'median', 'std']))
-print('='*75)
-print('\n')
+# print('Using best params...')
+# print(grid_cv.best_params_)
+
+# y_pred = grid_cv.predict(X_test.ravel())
+
+# print('Scoring model using tuned params...')
+# # print label and f1-score for each
+# avg = 'weighted'
+# labels = Y.columns.tolist()
+# f1 = []
+# prec = []
+# rec = []
+# acc = []
+# #train_scores = []
+# for i in range(y_test[:, :].shape[1]):
+#     f1.append(f1_score(y_test[:, i], y_pred[:, i], average=avg))
+#     acc.append(accuracy_score(y_test[:, i], y_pred[:, i]))
+#     rec.append(recall_score(y_test[:, i], y_pred[:, i], average=avg))
+#     prec.append(precision_score(y_test[:, i], y_pred[:, i], average=avg))
+
+# # summarize f1-scores and compare to the rate of positive class occurance
+# f1_df = pd.DataFrame({'f1-score': np.round(f1, 4),
+#                       'precision': np.round(prec, 4),
+#                       'recall': np.round(rec, 4),
+#                       'accuracy': np.round(acc, 4)}, index=labels)
+
+
+# print('\n')
+# print('='*75)
+# print(f1_df)
+# print('\n')
+# print(f1_df.agg(['mean', 'median', 'std']))
+# print('='*75)
+# print('\n')
 
 
 #%%
