@@ -64,7 +64,6 @@ from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
 from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
 
 
-#%%
 pd.options.display.max_columns = 60
 pd.options.display.max_rows = 60
 
@@ -132,8 +131,47 @@ Y = df.iloc[:, 3:]
 # =============================================================================
 
 df.head()
+df.shape
+
+df = df.sample(25000)
+df.reset_index(drop=False, inplace=True)
+
+### DROP ROWS
+# where sum across entire row is less than 1
+null_idx = np.where(df.loc[:, 'related':].sum(axis=1) < 1)[0]
+
+# drop rows which contain all null values
+df.drop(null_idx, axis=0, inplace=True)
+
+# drop rows where 'related' has a numeric 2
+related_twos = df[df['related'] == 2]
+df.drop(index=related_twos.index, inplace=True)
 
 
+df.shape
+
+
+
+### TEST
+
+# ISSUE:
+#   - KeyError; index not found in axis
+# SOLUTION:
+#   - reset index after sampling the DataFrame, this way `np.where` will return
+#   the appropriate index
+
+# NOTE:
+#   - np.where returns relatve indecies of positive occurance. It does not
+#   use the DataFrame indices.
+#   - therefore, DataFrame indices must be reset
+
+
+
+df = df.sample(5000)
+df.reset_index(drop=False, inplace=True)
+dfs = df.iloc[:10, :]
+nidx = np.where(dfs.loc[:, 'related':].sum(axis=1) < 1)[0]
+dfs.loc[nidx, 'message':]
 
 
 #%%
