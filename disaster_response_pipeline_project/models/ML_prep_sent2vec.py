@@ -92,7 +92,8 @@ def tokenize(text):
     # load stopwords
     stop_words = stopwords.words("english")
 
-    remove_words = ['one', 'see', 'please', 'thank', 'thank you', 'thanks']
+    remove_words = ['one', 'see', 'please', 'thank', 'thank you', 'thanks',
+                    'we', 'us', 'you', 'me']
     for addtl_word in remove_words:
         stop_words.append(addtl_word)
 
@@ -120,6 +121,19 @@ X = df.iloc[:, 1]
 Y = df.iloc[:, 3:]
 
 # X, Y, category_names = load_data('sqlite:///../data/disaster_response.db')
+
+
+#%%
+
+# =============================================================================
+
+# Explore and clean messages
+
+# =============================================================================
+
+df.head()
+
+
 
 
 #%%
