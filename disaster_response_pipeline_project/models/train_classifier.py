@@ -86,7 +86,6 @@ def tokenize(text):
     return lemmatized
 
 
-# In[4]:
 def load_data(database_filepath, n_sample=5000):
     """
     Import data from database into a DataFrame. Split DataFrame into
@@ -144,8 +143,6 @@ def load_data(database_filepath, n_sample=5000):
     category_names = Y.columns.to_list()
 
     return X, Y, category_names
-
-#%%
 
 def grid_search(model, X, y):
     """
@@ -214,7 +211,7 @@ def grid_search(model, X, y):
 
     return grid_cv
 
-def build_model():
+def build_model(clf):
     """
 
     Creates a Pipeline object with preset initial params for estimators
@@ -227,38 +224,6 @@ def build_model():
     """
     N_JOBS = -1
 
-    rf_params = dict(
-        n_estimators=100,
-        max_depth=8,
-        max_features=0.8,
-        max_samples=0.8,
-        class_weight='balanced',
-        n_jobs=N_JOBS,
-        random_state=11
-        )
-    lg_params = dict(
-        C = 0.1,
-        solver = 'newton-cg',
-        penalty = 'l2',
-        class_weight = 'balanced',
-        multi_class = 'auto',
-        n_jobs = N_JOBS,
-        random_state = 11
-    )
-
-    svc_params = dict(
-        C = 0.01,
-        kernel = 'rbf',
-        gamma = 0.02,
-        cache_size = 1000,
-        class_weight = 'balanced',
-        random_state = 11
-        )
-
-    # clf = RandomForestClassifier(**rf_params)
-    clf = LogisticRegression(**lg_params)
-    # clf = svm.SVC(**svc_params)
-
     count_vec = CountVectorizer(
         tokenizer=tokenize,
         ngram_range=(1, 1),
@@ -267,33 +232,23 @@ def build_model():
         max_df=0.98,
         min_df=5
         )
-    hash_vec = HashingVectorizer(
-        tokenizer=tokenize,
-        ngram_range=(1, 1),
-        n_features=200,
-        dtype=np.float32
-        )
 
     pipeline = Pipeline([
-
-    ('features', FeatureUnion([
+        ('features', FeatureUnion([
             ('text_pipeline', Pipeline([
                     ('count_vect', count_vec),
-                    ('tfidf_tx', TfidfTransformer()),
+                    ('tfidf_tx', TfidfTransformer(sublinear_tf=True)),
                     ])),
-            ('keywords', KeywordSearch()),
+            # ('keywords', KeywordSearch()),
             # ('verb_noun_count', GetVerbNounCount()),
             # ('entity_count', EntityCount()),
             # ('verb_extract', StartingVerbExtractor()),
 
     ], n_jobs=1)),
-
-    # ('norm', Normalizer()),
     ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))])
 
     # return grid search object
     return pipeline
-
 
 
 
@@ -331,7 +286,7 @@ def evaluate_model(model, x_test, y_test, category_names):
 
     if isinstance(y_test, (pd.DataFrame, pd.Series)):
         y_test = y_test.values
-
+    print('Evaluating model params:\n', model.get_params()['clf__estimator'])
     y_pred = model.predict(x_test)
 
     # print label and f1-score for each
@@ -356,8 +311,7 @@ def evaluate_model(model, x_test, y_test, category_names):
     print('\n')
     print('='*75)
     print(f1_df)
-    print('\n')
-    print('Test Data Results:')
+    print('\nTest Data Results:')
     print(f1_df.agg(['mean', 'median', 'std']))
     print('='*75)
     print('\n')
@@ -501,6 +455,39 @@ def main(sample_int=5000, gs=False, cv_split=3):
         None. Prints results to screen.
 
     """
+    N_JOBS = -1
+
+    rf_params = dict(
+        n_estimators=100,
+        max_depth=8,
+        max_features=0.8,
+        max_samples=0.8,
+        class_weight='balanced',
+        n_jobs=N_JOBS,
+        random_state=11
+        )
+    lg_params = dict(
+        C = 0.01,
+        solver = 'newton-cg',
+        penalty = 'l2',
+        class_weight = 'balanced',
+        multi_class = 'auto',
+        n_jobs = N_JOBS,
+        random_state = 11
+    )
+
+    svc_params = dict(
+        C = 0.01,
+        kernel = 'linear',
+        gamma = 0.02,
+        cache_size = 1000,
+        class_weight = 'balanced',
+        random_state = 11
+        )
+
+    # clf = RandomForestClassifier(**rf_params)
+    clf = LogisticRegression(**lg_params)
+    # clf = svm.SVC(**svc_params)
 
     if len(sys.argv) == 3:
         with warnings.catch_warnings():
@@ -528,8 +515,9 @@ def main(sample_int=5000, gs=False, cv_split=3):
             show_info(X_train, y_train)
 
 
-            model = build_model()
+            model = build_model(clf)
             print('Model params:\n', model.get_params()['clf__estimator'])
+            print('Classifier params:\n', clf)
             start_time = time.perf_counter()
             print('\nTraining model...')
             model.fit(X_train.ravel(), y_train)
