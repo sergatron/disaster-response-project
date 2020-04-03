@@ -2,9 +2,9 @@ import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 warnings.filterwarnings('ignore')
 
-from joblib import dump, load
+from joblib import dump
 
-import pickle
+import gc
 import sys
 import re
 import numpy as np
@@ -15,61 +15,30 @@ import nltk
 # nltk.download(['stopwords', 'punkt', 'wordnet', 'averaged_perceptron_tagger',
 #               'maxent_ne_chunker', 'words', 'word2vec_sample'])
 
-
 from sqlalchemy import create_engine
 
-import nltk
-from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
-from nltk.stem.porter import PorterStemmer
-from nltk import ne_chunk, pos_tag
 
 from sklearn import svm
 from sklearn.linear_model import LogisticRegression
-
-from sklearn.ensemble import (RandomForestClassifier,
-                              ExtraTreesClassifier,
-                              BaggingClassifier,
-                              RandomTreesEmbedding,
-                              StackingClassifier
-                              )
-
-
-
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.multioutput import MultiOutputClassifier
-from sklearn.multiclass import OneVsRestClassifier
-
-
-
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
-
-from sklearn.pipeline import Pipeline, FeatureUnion
-from sklearn.preprocessing import (Normalizer, QuantileTransformer,
-                                   PolynomialFeatures)
-
-from sklearn.compose import ColumnTransformer
-
-from sklearn.base import BaseEstimator, TransformerMixin
-
-from sklearn.feature_extraction.text import (CountVectorizer,
-                                             TfidfTransformer,
-                                             HashingVectorizer
-                                             )
-
-from sklearn.feature_selection import chi2, SelectKBest
-from sklearn.decomposition import TruncatedSVD
-
 from sklearn.neighbors import (KNeighborsClassifier,
                                NeighborhoodComponentsAnalysis)
 
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score, KFold
+from sklearn.pipeline import Pipeline, FeatureUnion
+from sklearn.preprocessing import Normalizer, QuantileTransformer
+from sklearn.feature_extraction.text import (CountVectorizer, TfidfTransformer,
+                                             HashingVectorizer)
+
 from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
                              recall_score, classification_report,
-                             accuracy_score, make_scorer, log_loss)
+                             accuracy_score)
 
 from sklearn.utils import resample
-
-from sklearn.neural_network import MLPClassifier
 
 from custom_transform import (KeywordSearch, StartingVerbExtractor,
                               GetVerbNounCount, EntityCount)
@@ -78,22 +47,18 @@ from custom_transform import (KeywordSearch, StartingVerbExtractor,
 
 def tokenize(text):
     """
+    Replace `url` with empty space "".
+    Tokenize and lemmatize input `text`.
+    Converts to lower case and strips whitespaces.
 
-    Applies the following steps to process input `text`.
-    1. Replace `url` with empty space.
-    2. Remove stopwords.
-    3. Tokenize and lemmatize input `text`.
-    4. Converts to lower case and strips whitespaces.
-
-    Params:
-    -------
-        text: str
-            string to process by applying above steps
 
     Returns:
     --------
         dtype: list, containing processed words
     """
+
+    lemm = WordNetLemmatizer()
+
     url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
 
     detected_urls = re.findall(url_regex, text)
@@ -103,12 +68,18 @@ def tokenize(text):
     # load stopwords
     stop_words = stopwords.words("english")
 
+    remove_words = ['one', 'see', 'please', 'thank', 'thank you', 'thanks',
+                    'we', 'us', 'you', 'me', 'their', 'there', 'here']
+    for addtl_word in remove_words:
+        stop_words.append(addtl_word)
 
-    # remove punctuations (retain alphabetical and numeric chars) and convert
-    # to all lower case tokenize resulting text
-    tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
+    # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
+    # tokenize resulting text
+    tokens = word_tokenize(re.sub(r"[^a-zA-Z]", ' ', text.lower().strip()))
 
-    lemm = WordNetLemmatizer()
+    # drop stop words
+    no_stops = [word for word in tokens if word not in stop_words]
+
     # lemmatize and remove stop words
     lemmatized = [lemm.lemmatize(word) for word in tokens if word not in stop_words]
 
@@ -116,7 +87,7 @@ def tokenize(text):
 
 
 # In[4]:
-def load_data(database_filepath):
+def load_data(database_filepath, n_sample=5000):
     """
     Import data from database into a DataFrame. Split DataFrame into
     features and predictors, `X` and `Y`. Additionally, extract the names
@@ -142,22 +113,32 @@ def load_data(database_filepath):
 
     # extract table name by stripping away directory name
     table_name = database_filepath.replace('.db', '').replace(dir_[0], "")
-
     df = pd.read_sql_table(f'{table_name}', engine)
 
     # Sample data
-    df = df.sample(5000)
+    if n_sample > 0:
+        df = df.sample(n_sample)
+
+    # reset index
+    df.reset_index(drop=False, inplace=True)
+
+    # DROP ROWS/COLUMN
+    # where sum across entire row is less than 1
+    null_idx = np.where(df.loc[:, 'related':].sum(axis=1) < 1)[0]
+    # drop rows which contain all null values
+    df.drop(null_idx, axis=0, inplace=True)
 
     # explore `related` feature where its labeled as a `2`
     related_twos = df[df['related'] == 2]
     df.drop(index=related_twos.index, inplace=True)
 
+    # reset index
     df = df.reset_index(drop=True)
 
     # define features and predictors
     X = df.loc[:, 'message']
     Y = df.loc[:, 'related':]
-
+    Y.drop(Y.nunique()[Y.nunique() < 2].index.tolist(), axis=1, inplace=True)
 
     # extract label names
     category_names = Y.columns.to_list()
@@ -166,7 +147,7 @@ def load_data(database_filepath):
 
 #%%
 
-def grid_search(model):
+def grid_search(model, X, y):
     """
 
     Performs GridSearch to find the best Hyperparameters to maximize
@@ -181,44 +162,55 @@ def grid_search(model):
         grid_cv: GridSearch object
 
     """
-    N_JOBS = 1
-    ext = ExtraTreesClassifier(n_estimators=10,
-                               n_jobs=6,
-                               class_weight='balanced')
-    bg = BaggingClassifier(n_jobs=6)
+    N_JOBS = 2
+    # ext = ExtraTreesClassifier()
+    # bg = BaggingClassifier()
+    rf = RandomForestClassifier()
+    lg = LogisticRegression()
+    svc = svm.SVC()
 
     grid_params = [
-        # {
-        #     'clf__estimator': [ext],
-        #     'clf__estimator__n_estimators': [100],
-        #     # 'clf__estimator__max_depth': [None, 2, 3],
-        #     # 'clf__estimator__bootstrap': [True, False],
-        #     'clf__estimator__n_jobs': [6],
-        #     'clf__estimator__random_state': [11]
-        #     },
 
         {
-            'clf__estimator': [bg],
-            'clf__estimator__n_estimators': [100, 110, 120],
-            # 'decomp__n_components': [2, 3],
-            # 'clf__estimator__max_samples': [0.7, 0.8, 1.0],
-            # 'clf__estimator__max_features': [0.7, 0.8, 1.0],
-            # 'clf__estimator__bootstrap_features': [True, False],
-            # 'clf__estimator__bootstrap': [True, False],
-            # 'vectorizer__ngram_range': [(1,2), (1,3), (2,2)],
-            'clf__estimator__n_jobs': [6],
+            'clf__estimator': [rf],
+            'clf__estimator__n_estimators': [20, 50],
+            'clf__estimator__max_depth': [4, 8],
+            'clf__estimator__max_samples': [0.6, 0.8],
+            'clf__estimator__max_features': [0.6, 0.8],
+            'clf__estimator__n_jobs': [N_JOBS],
             'clf__estimator__random_state': [11]
-            }
+            },
+        {
+            'clf__estimator': [lg],
+            'clf__estimator__C': [0.1, 0.01],
+            'clf__estimator__penalty': ['l2'],
+            'clf__estimator__solver': ['newton-cg'],
+            'clf__estimator__class_weight': ['balanced'],
+            'clf__estimator__multi_class': ['auto'],
+            'clf__estimator__n_jobs': [-1],
+            'clf__estimator__random_state': [11]
+            },
+        # {
+        #     'clf__estimator': [svc],
+        #     'clf__estimator__C': [0.1, 0.01, 0.05],
+        #     'clf__estimator__kernel': ['rbf'],
+        #     'clf__estimator__gamma': [0.02],
+        #     'clf__estimator__class_weight': ['balanced'],
+        #     'clf__estimator__random_state': [11]
+        #     }
+
         ]
 
-
+    print('\nTuning hyper-parameters...')
     grid_cv = GridSearchCV(
         model,
         grid_params,
         cv=3,
-        scoring='f1_weighted',
+        scoring='recall_weighted',
         n_jobs=N_JOBS,
     )
+
+    grid_cv.fit(X, y)
 
     return grid_cv
 
@@ -234,86 +226,72 @@ def build_model():
 
     """
     N_JOBS = -1
-    bg_params = dict(
-        n_estimators=60,
-        n_jobs=N_JOBS,
-        random_state=11
-        )
-    ext_params = dict(
-        n_estimators=105,
-        n_jobs=N_JOBS,
-        random_state=11
-        )
+
     rf_params = dict(
-        n_estimators=140,
-        # max_depth=2,
+        n_estimators=100,
+        max_depth=8,
+        max_features=0.8,
+        max_samples=0.8,
         class_weight='balanced',
         n_jobs=N_JOBS,
         random_state=11
         )
-    rt_params = dict(
-        n_estimators=30,
-        max_depth=3,
+    lg_params = dict(
+        C = 0.1,
+        solver = 'newton-cg',
+        penalty = 'l2',
+        class_weight = 'balanced',
+        multi_class = 'auto',
         n_jobs = N_JOBS,
+        random_state = 11
+    )
+
+    svc_params = dict(
+        C = 0.01,
+        kernel = 'rbf',
+        gamma = 0.02,
+        cache_size = 1000,
+        class_weight = 'balanced',
         random_state = 11
         )
 
-    clf = MLPClassifier(random_state=11,
-                        hidden_layer_sizes=(200,),
-                        alpha=0.00001,
-                        learning_rate='adaptive',
-                        activation='relu',
-                        max_iter=300)
-
-    # clf = BaggingClassifier(**bg_params)
     # clf = RandomForestClassifier(**rf_params)
-    # clf = ExtraTreesClassifier(**ext_params)
+    clf = LogisticRegression(**lg_params)
+    # clf = svm.SVC(**svc_params)
 
     count_vec = CountVectorizer(
         tokenizer=tokenize,
         ngram_range=(1, 1),
-        # max_features=200
+        dtype=np.uint16,
+        max_features=2500,
+        max_df=0.98,
+        min_df=5
         )
     hash_vec = HashingVectorizer(
         tokenizer=tokenize,
         ngram_range=(1, 1),
         n_features=200,
+        dtype=np.float32
         )
-
-    # # build pipeline
-    # pipeline = Pipeline([
-    #     ('vectorizer', count_vec),
-    #     ('tfidf_tx', TfidfTransformer()),
-    #     # ('norm', Normalizer(norm='l2', copy=False)),
-
-
-    #     ('decomp', TruncatedSVD(n_components=3,
-    #                             random_state=11)),
-    #     # ('poly', PolynomialFeatures(degree=10, interaction_only=False)),
-    #     ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
-    # ])
 
     pipeline = Pipeline([
 
     ('features', FeatureUnion([
             ('text_pipeline', Pipeline([
-                    ('count_vect', count_vec)
+                    ('count_vect', count_vec),
+                    ('tfidf_tx', TfidfTransformer()),
                     ])),
-
             ('keywords', KeywordSearch()),
-            ('verb_noun_count', GetVerbNounCount()),
+            # ('verb_noun_count', GetVerbNounCount()),
             # ('entity_count', EntityCount()),
             # ('verb_extract', StartingVerbExtractor()),
 
-
     ], n_jobs=1)),
 
-    ('tfidf_tx', TfidfTransformer()),
-    ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))
-    ])
+    # ('norm', Normalizer()),
+    ('clf', MultiOutputClassifier(clf, n_jobs=N_JOBS))])
 
-
-    # # return grid search object
+    # return grid search object
     return pipeline
 
 
@@ -351,7 +329,11 @@ def evaluate_model(model, x_test, y_test, category_names):
 
     """
 
+    if isinstance(y_test, (pd.DataFrame, pd.Series)):
+        y_test = y_test.values
+
     y_pred = model.predict(x_test)
+
     # print label and f1-score for each
     avg = 'weighted'
     f1 = []
@@ -359,10 +341,6 @@ def evaluate_model(model, x_test, y_test, category_names):
     rec = []
     acc = []
     for i in range(y_test[:, :].shape[1]):
-     #    with warnings.catch_warnings():
-    	# # ignore all caught warnings
-     #        warnings.filterwarnings("ignore")
-
         acc.append(accuracy_score(y_test[:, i],y_pred[:, i]))
         f1.append(f1_score(y_test[:, i],y_pred[:, i], average=avg,))
         rec.append(recall_score(y_test[:, i],y_pred[:, i], average=avg))
@@ -403,12 +381,11 @@ def show_info(X_train, y_train):
         NoneType. Prints out the shape of predictors and target arrays.
 
     """
-    print("X-shape:", X_train.shape)
+    print("\nX-shape:", X_train.shape)
     print("Y-shape:", y_train.shape)
 
 def save_model(model, filepath):
     """
-
     Pickles model to given file path.
 
     Params:
@@ -422,7 +399,6 @@ def save_model(model, filepath):
     Returns:
     -------
         None.
-
     """
     try:
         dump(model, filepath)
@@ -430,9 +406,80 @@ def save_model(model, filepath):
         print(e)
         print('Failed to pickle model.')
 
+def upsample(X_train, y_train, target_col_name, sample_fraction=0.25):
+
+    # combine train sets
+    X_c = pd.concat([X_train, y_train], axis=1)
+    # extract `success` and `fail` instances, `success` represented by 1
+    fail = X_c[X_c[target_col_name] == 0]
+    success = X_c[X_c[target_col_name] == 1]
+
+    # upsample to match 'fail' class
+    success_upsampled = resample(success,
+                                  replace=True,
+                                  n_samples=int(len(fail)*(sample_fraction)),
+                                  random_state=11
+                                  )
+    # put back together resample `success` and fail
+    upsample = pd.concat([fail, success_upsampled])
+    # split back into X_train, y_train
+    X_train = upsample['message']
+    y_train = upsample.drop('message', axis=1)
+
+    return X_train, y_train
+
+
+def downsample(X_train, y_train, target_col_name, sample_fraction=1.0):
+    """
+
+    Parameters
+    ----------
+        X_train : pd.DataFrame
+            Training feature space subset.
+
+        y_train : pd.DataFrame
+            Training target variable subset.
+
+        target_col_name : str
+            Target variable to resample.
+
+        sample_fraction : float, optional
+            Controls the number of samples being drawn from an array.
+            This essentially controls the magnitude of downsampling. Increasing
+            this value will draw more samples with a positive instance
+            from array thus chaning affecting the balance.
+
+    Returns
+    -------
+        X_train : pd.DataFrame
+        y_train : pd.DataFrame
+
+    """
+    # combine train sets
+    X_c = pd.concat([X_train, y_train], axis=1)
+    # extract `success` and `fail` instances, `success` represented by 1
+    fail = X_c[X_c['aid_related'] == 0]
+    success = X_c[X_c['aid_related'] == 1]
+
+    # downsample w/replacment; number of samples = len(fail)
+    # this essentially add more instances of `fail` to improve balance
+    success_downsampled = resample(fail,
+                                  replace=True,
+                                  n_samples=int(len(success)*sample_fraction),
+                                  random_state=11
+                                  )
+
+    # put back together resample `success` and fail
+    downsample = pd.concat([success, success_downsampled])
+    # split back into X_train, y_train
+    X_train = downsample['message']
+    y_train = downsample.drop('message', axis=1)
+
+    return X_train, y_train
+
 
 #%%
-def main():
+def main(sample_int=5000, gs=False, cv_split=3):
     """
     Command Line arguments:
 
@@ -454,6 +501,7 @@ def main():
         None. Prints results to screen.
 
     """
+
     if len(sys.argv) == 3:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
@@ -462,16 +510,26 @@ def main():
 
             print('\nLoading data...\n    DATABASE: {}'.format(database_filepath))
 
-            X, Y, category_names = load_data(database_filepath)
-            X_train, X_test, y_train, y_test = train_test_split(X.values,
-                                                                Y.values,
+            X, Y, category_names = load_data(database_filepath, n_sample=sample_int)
+            X_train, X_test, y_train, y_test = train_test_split(X,
+                                                                Y,
                                                                 test_size=0.2)
+            del X, Y, database_filepath
+            gc.collect()
 
             show_info(X_train, y_train)
 
-            print('\nBuilding model...')
-            model = build_model()
+            #### Upsample more important features
+            for col in ['missing_people', 'clothing', 'food']:
+                X_train, y_train = upsample(X_train, y_train, col, 0.9)
+            #### Downsample
+            X_train, y_train = downsample(X_train, y_train, 'aid_related', 0.4)
+            print('\nResampled shape:')
+            show_info(X_train, y_train)
 
+
+            model = build_model()
+            print('Model params:\n', model.get_params()['clf__estimator'])
             start_time = time.perf_counter()
             print('\nTraining model...')
             model.fit(X_train.ravel(), y_train)
@@ -481,21 +539,37 @@ def main():
             print('\nEvaluating model...')
             evaluate_model(model, X_test.ravel(), y_test, category_names)
 
-            # print('\nBest model:', model.best_estimator_)
-            if hasattr(model, 'best_params_'):
-                print('\nBest params:', model.best_params_)
-                print('\nBest score:', model.best_score_)
-                print('Mean scores:', model.cv_results_['mean_test_score'])
 
-            print('\nCross-validating...\n')
-            scores = cross_val_score(
-                model,
-                X_train.ravel(),
-                y_train,
-                scoring='f1_weighted',
-                cv=3,
-                n_jobs=-1)
-            print('\nCross-val scores:\n', scores)
+            # perform grid-search if specified
+            if gs:
+                grid_cv = grid_search(model, X_train, y_train)
+                if hasattr(grid_cv, 'best_params_'):
+                    print('\nBest params:', grid_cv.best_params_)
+                    print('\nBest score:', grid_cv.best_score_)
+                    print('Mean scores:', grid_cv.cv_results_['mean_test_score'])
+                model = grid_cv.best_estimator_
+                print('\nEvaluating best estimator...')
+                evaluate_model(model, X_test.ravel(), y_test, category_names)
+
+            del X_test, y_test, category_names
+            gc.collect()
+
+            if cv_split > 0:
+                # perform cross-validation if the number of splits > 0
+                print('-'*75)
+                print('\nCross-validating...\n')
+                kf = KFold(n_splits=cv_split, shuffle=True, random_state=11)
+                scores = cross_val_score(
+                    model,
+                    X_train.ravel(),
+                    y_train,
+                    scoring='recall_weighted',
+                    cv=kf,
+                    n_jobs=-1)
+                print('\nCross-val scores:\n', scores)
+                print('-'*75)
+
+            print('\nFinal model params:\n', model.get_params()['clf__estimator'])
 
             print('\nSaving model...\n    MODEL: {}'.format(model_filepath))
             save_model(model, model_filepath)
@@ -510,4 +584,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main(sample_int=0, gs=False, cv_split=3)
