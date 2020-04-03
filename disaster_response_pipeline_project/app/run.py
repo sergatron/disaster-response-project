@@ -1,44 +1,45 @@
+import sys
+sys.path.append('C:\\Users\\smouz\\OneDrive\\Desktop\\udacity\\ds_nanodegree\\data-engineering\\disaster-response\\disaster_response_pipeline_project\\models')
 
 import re
 import json
 import plotly
 import pandas as pd
+import numpy as np
 
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
-from flask import Flask
-from flask import render_template, request, jsonify
+
 from plotly.graph_objs import Bar
 # from sklearn.externals import joblib
+
 from joblib import dump, load
 from sqlalchemy import create_engine
 
-
-import os
-# os.chdir('../models')
+from flask import render_template, request, jsonify
+from flask import Flask
 
 app = Flask(__name__)
 
+
 #%%
+
+
 def tokenize(text):
     """
+    Replace `url` with empty space "".
+    Tokenize and lemmatize input `text`.
+    Converts to lower case and strips whitespaces.
 
-    Applies the following steps to process input `text`.
-    1. Replace `url` with empty space.
-    2. Remove stopwords.
-    3. Tokenize and lemmatize input `text`.
-    4. Converts to lower case and strips whitespaces.
-
-    Params:
-    -------
-        text: str
-            string to process by applying above steps
 
     Returns:
     --------
         dtype: list, containing processed words
     """
+
+    lemm = WordNetLemmatizer()
+
     url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
 
     detected_urls = re.findall(url_regex, text)
@@ -48,25 +49,30 @@ def tokenize(text):
     # load stopwords
     stop_words = stopwords.words("english")
 
-    # remove additional words
-    remove_words = ['one', 'reason', 'see']
+    remove_words = ['one', 'see', 'please', 'thank', 'thank you', 'thanks',
+                    'we', 'us', 'you', 'me']
     for addtl_word in remove_words:
         stop_words.append(addtl_word)
 
     # remove punctuations (retain alphabetical and numeric chars) and convert to all lower case
     # tokenize resulting text
-    tokens = word_tokenize(re.sub(r"[^a-zA-Z0-9]", ' ', text.lower().strip()))
-    lemm = WordNetLemmatizer()
+    tokens = word_tokenize(re.sub(r"[^a-zA-Z]", ' ', text.lower().strip()))
+
+    # drop stop words
+    no_stops = [word for word in tokens if word not in stop_words]
+
     # lemmatize and remove stop words
-    lemmatized = [lemm.lemmatize(word) for word in tokens if word not in stop_words]
+    # lemmatized = [lemm.lemmatize(word) for word in tokens if word not in stop_words]
 
-    return lemmatized
+    return no_stops
 
 
-def load_data(database_filepath):
+
+def load_data(database_filepath, n_sample=5000):
     """
     Import data from database into a DataFrame. Split DataFrame into
-    features and predictors, `X` and `Y`.
+    features and predictors, `X` and `Y`. Additionally, extract the names
+    of target categories.
 
     Preprocess data.
 
@@ -75,33 +81,46 @@ def load_data(database_filepath):
         database_filepath: file path of database
 
     Returns:
-    --------
-        pd.DataFrame; (X, Y, df, category_names)
-        Features and predictors, `X` and `Y`, respectively.
-        Original DataFrame, `df`, and named of target labels
+    -------
+        tuple(X, Y, category_names)
+        pd.DataFrame of features and predictors, `X` and `Y`, respectively.
+        List of target category names
     """
+
+    engine = create_engine(f'sqlite:///{database_filepath}')
 
     # extract directory name
     dir_ = re.findall(".*/", database_filepath)
-    engine = create_engine(f'sqlite:///{database_filepath}')
-    # extratc table name by stripping away directory name
+
+    # extract table name by stripping away directory name
     table_name = database_filepath.replace('.db', '').replace(dir_[0], "")
 
     df = pd.read_sql_table(f'{table_name}', engine)
 
-    #           *** TEMPORARY SAMPLE TO TEST SCRIPT ***
-    df = df.sample(4000)
+
+    # Sample data
+    df = df.sample(n_sample)
+
+    # reset index
+    df.reset_index(drop=False, inplace=True)
+
+    # DROP ROWS/COLUMN
+    # where sum across entire row is less than 1
+    null_idx = np.where(df.loc[:, 'related':].sum(axis=1) < 1)[0]
+    # drop rows which contain all null values
+    df.drop(null_idx, axis=0, inplace=True)
 
     # explore `related` feature where its labeled as a `2`
     related_twos = df[df['related'] == 2]
     df.drop(index=related_twos.index, inplace=True)
 
+    # reset index
     df = df.reset_index(drop=True)
 
     # define features and predictors
     X = df.loc[:, 'message']
     Y = df.loc[:, 'related':]
-
+    Y.drop(Y.nunique()[Y.nunique() < 2].index.tolist(), axis=1, inplace=True)
 
     # extract label names
     category_names = Y.columns.to_list()
@@ -116,7 +135,7 @@ def load_data(database_filepath):
 # load model
 model = load("models/disaster_clf.pkl")
 
-X, Y, df, category_names = load_data('data/disaster_response.db')
+X, Y, df, category_names = load_data('data/disaster_response.db', 20000)
 
 # index webpage displays cool visuals and receives user input text for model
 @app.route('/')
@@ -188,10 +207,13 @@ def go():
     the labels to screen.
     """
     # save user input in query
-    query = request.args.get('query', '')
+    query = request.args.get('query', 'Invalid entry')
+
+    toks = [tokenize(item) for item in [query]][0]
 
     # use model to predict classification for query
     classification_labels = model.predict([query])[0]
+
     classification_results = dict(zip(df.columns[4:], classification_labels))
 
     # This will render the go.html Please see that file.

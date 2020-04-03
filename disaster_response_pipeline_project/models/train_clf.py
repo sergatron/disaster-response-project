@@ -75,10 +75,9 @@ from sklearn.utils import resample
 
 from sklearn.neural_network import MLPClassifier
 
-from custom_transform import (KeywordSearch, StartingVerbExtractor,
-                              GetVerbNounCount, EntityCount)
+# from custom_transform import (KeywordSearch, StartingVerbExtractor,
+#                               GetVerbNounCount, EntityCount)
 
-#%%
 
 def tokenize(text):
     """
@@ -119,7 +118,6 @@ def tokenize(text):
     return lemmatized
 
 
-# In[4]:
 def load_data(database_filepath, n_sample=5000):
     """
     Import data from database into a DataFrame. Split DataFrame into
@@ -176,7 +174,6 @@ def load_data(database_filepath, n_sample=5000):
 
     return X, Y, category_names
 
-#%%
 
 def grid_search(model, grid_params):
     """
@@ -258,8 +255,8 @@ def build_model():
         random_state=11
         )
     rf_params = dict(
-        n_estimators=400,
-        max_depth=12,
+        n_estimators=40,
+        # max_depth=12,
         class_weight='balanced',
         n_jobs=N_JOBS,
         random_state=11
@@ -492,7 +489,6 @@ def save_model(model, filepath):
         print('Failed to pickle model.')
 
 
-#%%
 def main(sample_int=5000, grid_search=False, LGBM=False):
     """
     Command Line arguments:
@@ -590,7 +586,7 @@ def main(sample_int=5000, grid_search=False, LGBM=False):
             model,
             X_train.ravel(),
             y_train,
-            scoring='f1_weighted',
+            scoring='recall_weighted',
             cv=3,
             n_jobs=-1)
         print('\nCross-val mean score:\n', np.round(np.mean(scores), 4))
@@ -601,6 +597,6 @@ def main(sample_int=5000, grid_search=False, LGBM=False):
         # print('\nTrained model saved!\n')
 
 
-
+#%%
 if __name__ == '__main__':
-    main(sample_int=18000, LGBM=False)
+    main(sample_int=10000, LGBM=False)

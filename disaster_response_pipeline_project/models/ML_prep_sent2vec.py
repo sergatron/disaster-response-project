@@ -579,6 +579,7 @@ class SentenceVector(BaseEstimator, TransformerMixin):
 # =============================================================================
 
 
+
 def load_data(database_filepath, n_sample=5000):
     """
     Import data from database into a DataFrame. Split DataFrame into
@@ -612,23 +613,25 @@ def load_data(database_filepath, n_sample=5000):
     # Sample data
     df = df.sample(n_sample)
 
+    # reset index
+    df.reset_index(drop=False, inplace=True)
+
     # DROP ROWS/COLUMN
+    # where sum across entire row is less than 1
+    null_idx = np.where(df.loc[:, 'related':].sum(axis=1) < 1)[0]
+    # drop rows which contain all null values
+    df.drop(null_idx, axis=0, inplace=True)
+
     # explore `related` feature where its labeled as a `2`
     related_twos = df[df['related'] == 2]
     df.drop(index=related_twos.index, inplace=True)
 
-    # # where sum across entire row is less than 1
-    # null_idx = np.where(df.loc[:, 'related':].sum(axis=1) < 1)[0]
-    # # drop rows which contain all null values
-    # df.drop(null_idx, axis=0, inplace=True)
-
-
+    # reset index
     df = df.reset_index(drop=True)
 
     # define features and predictors
     X = df.loc[:, 'message']
     Y = df.loc[:, 'related':]
-    print("\nFeature space shape:", X.shape)
     Y.drop(Y.nunique()[Y.nunique() < 2].index.tolist(), axis=1, inplace=True)
 
     # extract label names
@@ -663,7 +666,7 @@ def build_model():
     )
 
     rf_params = dict(
-        n_estimators=10,
+        n_estimators=20,
         # max_depth=4,
         max_features=0.8,
         max_samples=0.8,
@@ -671,16 +674,24 @@ def build_model():
         n_jobs=N_JOBS,
         random_state=11
     )
+    svc_params = dict(
+        C = 0.05,
+        kernel = 'rbf',
+        gamma = 0.02,
+        cache_size = 1000,
+        class_weight = 'balanced',
+        random_state = 11
+
+        )
 
     clf = LogisticRegression(**lg_params)
     # clf = RandomForestClassifier(**rf_params)
-
-
+    # clf = svm.SVC(**svc_params)
 
     # # build pipeline
     # pipeline = Pipeline([
-    #     ('sent_vec', SentenceVector(size=50, min_count=10, iter=6, window=1)),
-    #     # ('knn_imputer', KNNImputer(n_neighbors=5, weights='distance')),
+    #     ('sent_vec', SentenceVector(size=100, min_count=2, iter=6, window=1)),
+    #     ('knn_imputer', KNNImputer(n_neighbors=5, weights='distance')),
     #     # ('imputer', SimpleImputer(strategy='mean')),
     #     # ('norm', QuantileTransformer(output_distribution='normal',
     #     #                               random_state=11)),
@@ -696,22 +707,20 @@ def build_model():
     min_df=0.01
     )
 
-    sv = SentenceVector(size=100, min_count=5, iter=6, window=2)
+    sv = SentenceVector(size=100, min_count=1, iter=5, window=1)
 
     pipeline = Pipeline([
-
     ('features', FeatureUnion([
 
             ('count_vec_pipeline', Pipeline([
                     ('count_vect', count_vec),
-                    # ('tfidf_tx', TfidfTransformer()),
+                    ('tfidf_tx', TfidfTransformer()),
                     ])),
             ('sent_vec_pipeline', Pipeline([
                     ('sentence_vec', sv),
                     ('quant_tx', StandardScaler()),
                     ])),
             ('keywords', KeywordSearch()),
-            # ('sentence_vec', sv),
 
     ], n_jobs=1)),
     # ('norm', Normalizer(norm='l1', copy=False)),
@@ -883,7 +892,7 @@ def main(sample_int=5000, grid_search=False):
 
     print('\nLoading data...\n    DATABASE: {}'.format(database_filepath))
 
-    X, Y, category_names = load_data(database_filepath, n_sample=sample_int)
+    X, Y, category_names = load_data(database_filepath, n_sample=8000)
 
     # sv = SentenceVector(size=300, min_count=3, window=1, iter=4, workers=6)
     # X = sv.transform(X)
@@ -897,7 +906,6 @@ def main(sample_int=5000, grid_search=False):
     gc.collect()
 
     model = build_model()
-    # model = stacking_clf(rf_params)
 
     start_time = time.perf_counter()
     print('\nTraining model...')
@@ -917,17 +925,30 @@ def main(sample_int=5000, grid_search=False):
         print('\nBest score:', model.best_score_)
         print('Mean scores:', model.cv_results_['mean_test_score'])
 
-    print('\nCross-validating...\n')
-    gc.collect()
-    scores = cross_val_score(
-        model,
-        X_train.ravel(),
-        y_train,
-        scoring='f1_weighted',
-        cv=6,
-        n_jobs=-1)
-    print('\nCross-val mean score:\n', np.round(np.mean(scores), 4))
-    print("-"*75)
+    phrase = ['we need food, water, and shelter', 'sample phrase']
+
+    # phrase = ['we', 'need', 'food', 'water', 'and', 'shelter']
+    text_in = 'we need food, water, and shelter; we havent eaten in many days'
+    tok = [tokenize(item) for item in [text_in]][0]
+
+    preds = model.predict(tok)[0]
+    print(type(preds))
+    print(preds)
+    print(preds.shape)
+    print(dict(zip(category_names, preds)))
+
+
+    # print('\nCross-validating...\n')
+    # gc.collect()
+    # scores = cross_val_score(
+    #     model,
+    #     X_train.ravel(),
+    #     y_train,
+    #     scoring='f1_weighted',
+    #     cv=6,
+    #     n_jobs=-1)
+    # print('\nCross-val mean score:\n', np.round(np.mean(scores), 4))
+    # print("-"*75)
 
     # print('\nSaving model...\n    MODEL: {}'.format(model_filepath))
     # save_model(model, model_filepath)
@@ -936,4 +957,4 @@ def main(sample_int=5000, grid_search=False):
 
 #%%
 if __name__ == '__main__':
-    main(sample_int=20000)
+    main(sample_int=8000)
