@@ -18,7 +18,7 @@ Displays some visuals and requests user's query for prediction.
 
 ### Predictions Page
 
-Predicted categories are highlighted.
+Predicted categories are highlighted. A single message could have multiple requests for various help and these categories are highlighted below.
 
 ![](disaster_response_pipeline_project/img/app_predict.png)
 
